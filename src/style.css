@@ -1163,3 +1163,31 @@ body.crashed .world-picker {
   color: #007aff;
   background: #007aff15;
 }
+
+#sign-out[hidden] {
+  display: none;
+}
+#credit-dialog {
+  width: min(390px, calc(100% - 32px));
+  padding: 32px;
+  text-align: center;
+  border: 0;
+  border-radius: 20px;
+}
+#credit-dialog h2 {
+  font-size: 25px;
+  letter-spacing: -0.8px;
+  margin: 16px 0 12px;
+}
+#credit-dialog p {
+  font-size: 13px;
+  color: #737985;
+  line-height: 1.7;
+  margin-bottom: 22px;
+}
+#credit-dialog a {
+  display: block;
+  margin-top: 18px;
+  font-size: 11px;
+  color: #737985;
+}

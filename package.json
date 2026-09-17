@@ -13,7 +13,9 @@
     "test:browser:failures": "node scripts/browser-failures.mjs",
     "format": "prettier --write src server tests scripts vite.config.js index.html package.json README.md",
     "test:stop-line": "node --env-file=.env scripts/verify-stop-line.mjs",
-    "test:experience": "node scripts/browser-experience.mjs"
+    "test:experience": "node scripts/browser-experience.mjs",
+    "deploy": "npm run build && wrangler deploy",
+    "dev:worker": "npm run build && wrangler dev"
   },
   "dependencies": {
     "lucide": "^0.577.0",
@@ -22,6 +24,7 @@
   "devDependencies": {
     "@playwright/test": "^1.63.0",
     "prettier": "^3.9.7",
-    "vite": "^8.0.0"
+    "vite": "^8.0.0",
+    "wrangler": "^4.134.0"
   }
 }

@@ -60,7 +60,7 @@ export function validState(state) {
 export function questions(state) {
   return prepareJevRequest(state).request.questions;
 }
-export async function evaluate(state, env, signal) {
+export async function evaluate(state, env, signal, onUsage) {
   if (!validState(state)) {
     const error = new Error(
       "A valid driving observation and candidate batch are required.",
@@ -93,10 +93,13 @@ export async function evaluate(state, env, signal) {
             : `Jev API returned HTTP ${res.status}.`,
       );
       error.status = res.status;
+      error.billable = res.status >= 500;
       throw error;
     }
     data = await res.json();
   }
+  // Account for paid responses even when their decision later fails validation.
+  if (onUsage) await onUsage(data.usage);
   const a = expandJevAnswers(prepared, data.answers);
   const selection = decisionSelection(state, a);
   if (

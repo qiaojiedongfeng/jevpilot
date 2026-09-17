@@ -4,6 +4,8 @@ https://github.com/user-attachments/assets/4baef58e-54ef-4d17-9982-353a0b6e6f45
 
 A demo project showing Tesla Autopilot-like behavior using [Jev by TypeSafe AI](https://typesafe.ai/).
 
+[Try JevPilot](https://jevpilot.standardagents.ai) — sign in with Standard Agents for $0.25 of free Jev play credit. Joining the early-access list is optional.
+
 **Interstate 08:** start in Millbrook, turn onto the signed on-ramp, merge, cruise, and exit into Cedar Town for the final stop.
 
 ## How it works
@@ -32,3 +34,5 @@ Open [localhost:5173](http://localhost:5173). Your API key stays server-side in 
 **J** toggles autopilot · **WASD** to drive · **Space** to brake.
 
 Asset credits and licenses are included in [public/](public/).
+
+Cloudflare deployment details: [docs/hosting.md](docs/hosting.md).
