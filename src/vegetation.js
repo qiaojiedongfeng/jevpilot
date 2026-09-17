@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { rng } from "./math.js";
 import { pbr, metricUV, materials } from "./materials.js";
-import { renderProfile, mobileGraphics } from "./render-profile.js";
+import { renderProfile } from "./render-profile.js";
 
 function leafTexture() {
   const canvas = document.createElement("canvas");
@@ -207,7 +207,7 @@ export class Vegetation {
       mesh.computeBoundingSphere();
       this.scene.add(mesh);
     }
-    if (!mobileGraphics) this.grass();
+    this.grass();
   }
   grass() {
     const r = this.random,

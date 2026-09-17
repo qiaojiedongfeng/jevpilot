@@ -1,12 +1,9 @@
-// Keep the phone's GPU budget for the road and moving vehicles.
-export const mobileGraphics =
-  typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
-
+// Preserve the original visual quality on both phones and desktops.
 export const renderProfile = {
-  pixelRatio: mobileGraphics ? 1 : 1.5,
-  antialias: !mobileGraphics,
-  shadowSize: mobileGraphics ? 1024 : 2048,
-  detailedFoliage: !mobileGraphics,
-  leafCards: mobileGraphics ? 48 : 120,
-  anisotropy: mobileGraphics ? 2 : 8,
+  pixelRatio: 1.5,
+  antialias: true,
+  shadowSize: 2048,
+  detailedFoliage: true,
+  leafCards: 120,
+  anisotropy: 8,
 };

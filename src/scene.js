@@ -18,7 +18,7 @@ import { loadHeroCar, updateHeroWheels } from "./model-assets.js";
 import { detailedCar } from "./vehicle-model.js";
 import { HDRLoader } from "three/addons/loaders/HDRLoader.js";
 import { assetManager, assetsReady } from "./asset-loading.js";
-import { renderProfile, mobileGraphics } from "./render-profile.js";
+import { renderProfile } from "./render-profile.js";
 let daylight;
 function daylightEnvironment() {
   return (daylight ||= new HDRLoader(assetManager)
@@ -291,12 +291,7 @@ export class DriveScene {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.95;
-    this.camera = new THREE.PerspectiveCamera(
-      52,
-      1,
-      0.1,
-      mobileGraphics ? 700 : 1200,
-    );
+    this.camera = new THREE.PerspectiveCamera(52, 1, 0.1, 1200);
     this.viewport = { width: canvas.clientWidth, height: canvas.clientHeight };
     this.resizeObserver = new ResizeObserver(([entry]) => {
       this.viewport = entry.contentRect;
@@ -331,7 +326,7 @@ export class DriveScene {
         console.warn("Daylight environment unavailable", error),
       );
     this.scene.background = new THREE.Color("#b7c9db");
-    this.scene.fog = new THREE.Fog("#b7c6d0", 230, mobileGraphics ? 650 : 1050);
+    this.scene.fog = new THREE.Fog("#b7c6d0", 230, 1050);
     this.scene.add(new THREE.HemisphereLight("#d5e4f8", "#4e503a", 0.4));
     this.sun = new THREE.DirectionalLight("#fff0d9", 3.4);
     this.sun.position.set(-60, 110, 40);
