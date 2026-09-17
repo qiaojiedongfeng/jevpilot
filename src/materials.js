@@ -1,14 +1,16 @@
 import * as THREE from "three";
+import { assetManager } from "./asset-loading.js";
+import { renderProfile } from "./render-profile.js";
 
 export const materials = new Map();
-const loader = new THREE.TextureLoader();
+const loader = new THREE.TextureLoader(assetManager);
 const maps = new Map();
 function texture(name, kind) {
   const key = `${name}-${kind}`;
   if (!maps.has(key)) {
     const value = loader.load(`/textures/${key}.jpg`);
     value.wrapS = value.wrapT = THREE.RepeatWrapping;
-    value.anisotropy = 8;
+    value.anisotropy = renderProfile.anisotropy;
     if (kind === "color") value.colorSpace = THREE.SRGBColorSpace;
     maps.set(key, value);
   }

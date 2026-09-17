@@ -4,6 +4,7 @@ import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { materials, physical } from "./materials.js";
 import { steeringCurvature } from "./planning.js";
+import { assetManager } from "./asset-loading.js";
 
 let carAsset;
 const WHEEL_NAMES = ["wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr"];
@@ -26,8 +27,8 @@ export function updateHeroWheels(model, signedDistance, steering, speed) {
 
 export async function loadHeroCar() {
   carAsset ||= (async () => {
-    const decoder = new DRACOLoader().setDecoderPath("/draco/");
-    const loader = new GLTFLoader().setDRACOLoader(decoder);
+    const decoder = new DRACOLoader(assetManager).setDecoderPath("/draco/");
+    const loader = new GLTFLoader(assetManager).setDRACOLoader(decoder);
     const { scene } = await loader.loadAsync("/models/model-y/model-y.glb");
     decoder.dispose();
     const paint = physical("model-y-paint", {

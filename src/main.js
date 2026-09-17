@@ -31,6 +31,13 @@ import { BackgroundPlanner } from "./background-planner.js";
 import { DriveScene } from "./scene.js";
 import { MinimapControls } from "./minimap-controls.js";
 import { Tooltips } from "./tooltips.js";
+import { TouchControls } from "./touch-controls.js";
+import {
+  showLoading,
+  hideLoading,
+  loadingFailed,
+  nextPaint,
+} from "./loading-screen.js";
 import { prepareJevRequest, decisionInterval } from "./jev-request.js";
 import { THEMES } from "./world.js";
 import { candidateName, decisionControls } from "./planning.js";
@@ -71,7 +78,10 @@ const sim = new Simulation(
   Number(params.get("seed")) || Math.floor(Math.random() * 999999),
   THEMES[type] ? type : "city",
 );
-let playCredits = null;
+let playCredits = null,
+  loading = true,
+  lastMapDraw = 0;
+showLoading("Loading car and scenery…");
 let configured = false,
   busy = false,
   generation = 0,
@@ -108,15 +118,48 @@ $("app").innerHTML = `
 <div id="arrival" class="arrival glass" hidden><span class="arrival-mark">${icon("flag")}</span><span class="eyebrow">DESTINATION REACHED</span><h1>You made it.</h1><p id="arrival-summary"></p><button id="next-trip" class="primary">Next drive ${icon("arrow-up-right")}</button><button id="keep-driving" class="subtle">Keep exploring</button></div>
 <div class="bottom-hud"><div class="driver-dock glass"><div class="speed-cluster"><div title="Current speed"><strong id="speed">0</strong><span>km/h</span></div><span class="speed-limit" title="Speed limit"><small>LIMIT</small><b id="speed-limit">50</b></span></div><span class="dock-divider"></span><div class="pilot-actions"><button id="autopilot" class="pilot-button" role="switch" aria-checked="false" aria-label="Jev autopilot" title="Engage Jev · J">${icon("sparkles")}<span id="pilot-label">Engage Jev</span><kbd>J</kbd></button><button id="candidates-toggle" class="candidate-button" aria-label="Show steering candidates" aria-pressed="false" title="Show steering candidates"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 20V3m-3 3 3-3 3 3M12 20C12 14 7 12 3 8m0 3V8h3M12 20c0-6 5-8 9-12m-3 0h3v3"/><circle cx="12" cy="21" r="1" fill="currentColor" stroke="none"/></svg></button></div><div id="decision-status"><span id="pilot-state">Free play</span><span id="context-message">WASD to drive · Space to brake</span><span class="cost-total" title="Estimated cost from Jev-reported token usage and configured pricing."><span id="cost-label">Session</span> <strong id="cost">$0.000000</strong></span></div><span class="dock-divider"></span><div class="dock-tools" role="group" aria-label="View and driving controls"><button id="camera" title="Change camera · C" aria-label="Change camera">${icon("video")}<span id="camera-name">Chase</span></button><button id="scene-json" aria-label="Inspect live JSON" title="Inspect live JSON">${icon("braces")}</button><button id="fullscreen" aria-label="Enter fullscreen" title="Fullscreen">${icon("maximize")}</button><span class="divider"></span><button id="pause" aria-label="Pause simulation" title="Pause · P">${icon("pause")}</button><button id="sign-out" hidden aria-label="Sign out" title="Sign out">${icon("log-out")}</button></div></div></div>
 <dialog id="crash-dialog" aria-labelledby="crash-title" aria-describedby="crash-description"><span class="crash-symbol">${icon("x")}</span><span class="eyebrow">DRIVE ENDED</span><h1 id="crash-title">Game over.</h1><p id="crash-description"></p><div class="crash-stats"><div><strong id="crash-speed"></strong><span>km/h at impact</span></div><div><strong id="crash-distance"></strong><span>meters driven</span></div></div><button id="retry-drive" class="primary">${icon("rotate-ccw")} Restart drive</button><button id="crash-new-world" class="secondary">Try a new world ${icon("arrow-up-right")}</button></dialog>
-<dialog id="credit-dialog" aria-labelledby="credit-title"><span class="eyebrow">THANKS FOR TAKING A DRIVE</span><h2 id="credit-title">That's your free lap.</h2><p>Your $0.25 of Jev play credit has been used. You can keep exploring with the keyboard.</p><button id="credit-close" class="primary">Keep driving manually</button><a href="https://standardagents.ai/" target="_blank" rel="noopener noreferrer">Explore Standard Agents ↗</a></dialog>
+<dialog id="credit-dialog" aria-labelledby="credit-title"><span class="eyebrow">THANKS FOR TAKING A DRIVE</span><h2 id="credit-title">That's your free lap.</h2><p>Your $0.25 of Jev play credit has been used. You can keep exploring with manual controls.</p><button id="credit-close" class="primary">Keep driving manually</button><a href="https://standardagents.ai/" target="_blank" rel="noopener noreferrer">Explore Standard Agents ↗</a></dialog>
 <div id="toast" role="status" hidden></div>
 <dialog id="json-dialog"><div class="json-header"><div>${icon("braces")}<strong>Under the hood</strong><span id="json-live">LIVE · 4 Hz</span></div><button id="close-json" aria-label="Close JSON inspector">${icon("x")}</button></div><div class="json-toolbar"><div class="json-tabs"><button data-tab="request" class="active">Jev input</button><button data-tab="sensor">Perception</button><button data-tab="world">Full world</button><button data-tab="decision">Response</button></div><div class="json-actions"><button id="freeze-json">Freeze</button><button id="copy-json" aria-label="Copy displayed JSON">${icon("copy")} <span id="copy-json-label" aria-live="polite">Copy</span></button><button id="download-json">${icon("download")} Download</button></div></div><p id="json-description">Exact Jev API payload, including instructions and offered choices. Full geometry and control details stay local.</p><pre id="json-content"></pre></dialog>
-<dialog id="help-dialog"><button id="close-help" class="dialog-close" aria-label="Close help">${icon("x")}</button><span class="eyebrow">YOUR NEXT DRIVE</span><h2>Take the wheel.</h2><div class="help-keys"><span><kbd>W / ↑</kbd> Hold accelerator</span><span><kbd>S / ↓</kbd> Brake / reverse</span><span><kbd>A / D</kbd> Steer</span><span><kbd>SPACE</kbd> Brake</span><span><kbd>J</kbd> Jev autopilot</span><span><kbd>C</kbd> Camera</span><span><kbd>P</kbd> Pause</span><span><kbd>?</kbd> Keyboard help</span></div><p>Drag the scene to orbit in Chase or Bird’s eye; drag to look around in Driver view. Scroll to zoom outside; double-click to recenter. Tap A/D for small corrections; hold for a sharper turn and release to recenter. Hold W to accelerate; release to coast with drag. S brakes, then reverses once stopped. Space applies the brake. Autopilot sets target speed directly.</p><p>The bright blue line is Jev's selected three-second plan. Use Candidates to see the sampled paths: forward in blue/cyan, reverse in purple, lane departures in amber, and predicted collisions in orange. Choice probabilities are available in the JSON inspector. The safety brake can reduce speed for a missed hazard; interventions are shown beside the autopilot button.</p><p class="asset-credits">Vehicle: <a href="https://sketchfab.com/3d-models/tesla-model-y-2021-c0a86cac582d4b33aba0fb1b1912d970" target="_blank" rel="noreferrer">Tesla Model Y 2021</a> by 763468712, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a>. Geometry adapted by Tina 3D Tesla; optimized, re-materialed, and wheel-rigged for JevPilot. Tree, shrub, streetlight, surface textures and sky: <a href="https://polyhaven.com" target="_blank" rel="noreferrer">Poly Haven</a>, CC0.</p><p>Driving keys take back control. Use the JSON button for live inputs, full world state, probabilities, and session telemetry.</p></dialog>`;
+<dialog id="help-dialog"><button id="close-help" class="dialog-close" aria-label="Close help">${icon("x")}</button><span class="eyebrow">YOUR NEXT DRIVE</span><h2>Take the wheel.</h2><p class="touch-help">Use the thumbstick to steer. Push up to accelerate, pull down to brake and reverse. Release to coast; hold Brake to stop.</p><div class="help-keys"><span><kbd>W / ↑</kbd> Hold accelerator</span><span><kbd>S / ↓</kbd> Brake / reverse</span><span><kbd>A / D</kbd> Steer</span><span><kbd>SPACE</kbd> Brake</span><span><kbd>J</kbd> Jev autopilot</span><span><kbd>C</kbd> Camera</span><span><kbd>P</kbd> Pause</span><span><kbd>?</kbd> Keyboard help</span></div><p>Drag the scene to orbit in Chase or Bird’s eye; drag to look around in Driver view. Scroll to zoom outside; double-click to recenter. Tap A/D for small corrections; hold for a sharper turn and release to recenter. Hold W to accelerate; release to coast with drag. S brakes, then reverses once stopped. Space applies the brake. Autopilot sets target speed directly.</p><p>The bright blue line is Jev's selected three-second plan. Use Candidates to see the sampled paths: forward in blue/cyan, reverse in purple, lane departures in amber, and predicted collisions in orange. Choice probabilities are available in the JSON inspector. The safety brake can reduce speed for a missed hazard; interventions are shown beside the autopilot button.</p><p class="asset-credits">Vehicle: <a href="https://sketchfab.com/3d-models/tesla-model-y-2021-c0a86cac582d4b33aba0fb1b1912d970" target="_blank" rel="noreferrer">Tesla Model Y 2021</a> by 763468712, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a>. Geometry adapted by Tina 3D Tesla; optimized, re-materialed, and wheel-rigged for JevPilot. Tree, shrub, streetlight, surface textures and sky: <a href="https://polyhaven.com" target="_blank" rel="noreferrer">Poly Haven</a>, CC0.</p><p>Driving keys take back control. Use the JSON button for live inputs, full world state, probabilities, and session telemetry.</p></dialog>`;
+$("app").insertAdjacentHTML(
+  "beforeend",
+  `
+<div id="touch-controls" class="touch-controls" role="group" aria-label="Touch driving controls" hidden>
+  <div class="touch-steering">
+    <div class="touch-stick" role="group" aria-label="Driving joystick: drag up to accelerate, down to brake or reverse, left or right to steer">
+      <span class="stick-up" aria-hidden="true">↑</span><span class="stick-down" aria-hidden="true">↓</span>
+      <span class="stick-left" aria-hidden="true">‹</span><span class="stick-right" aria-hidden="true">›</span>
+      <span class="touch-knob" aria-hidden="true"></span>
+    </div>
+    <span class="touch-hint">Drag to drive</span>
+  </div>
+  <button class="touch-brake" aria-label="Hold to brake"><span aria-hidden="true">Ⅱ</span>Brake</button>
+</div>`,
+);
 createIcons({ icons });
 const scene = new DriveScene($("world-canvas"), sim, $("vector-labels")),
   map = $("map-canvas").getContext("2d");
 const minimap = new MinimapControls($("minimap"), sim, drawMap);
 const tooltips = new Tooltips();
+const touch = new TouchControls(
+  $("touch-controls"),
+  () =>
+    !loading &&
+    !sim.autopilot &&
+    !sim.paused &&
+    !sim.crash &&
+    !document.hidden &&
+    !document.querySelector("dialog[open]") &&
+    (sim.freeExplore || !sim.complete),
+);
+const dockObserver = new ResizeObserver(([entry]) => {
+  // Anchor both thumbs above the actual dock, including wrapped mobile layouts.
+  const height =
+    entry.borderBoxSize?.[0]?.blockSize ?? entry.target.offsetHeight;
+  document.documentElement.style.setProperty("--dock-height", `${height}px`);
+});
+dockObserver.observe(document.querySelector(".driver-dock"));
 for (const element of document.querySelectorAll(
   ".bottom-hud button, .bottom-hud [title], .minimap button, #map-toggle, #github-link",
 ))
@@ -192,6 +235,9 @@ if (import.meta.hot)
     planner.dispose();
     minimap.dispose();
     tooltips.dispose();
+    touch.dispose();
+    dockObserver.disconnect();
+    scene.dispose();
   });
 
 function toast(text, type = "info") {
@@ -214,9 +260,12 @@ function syncPilot() {
   tooltips.set($("autopilot"), `${on ? "Disengage" : "Engage"} Jev · J`);
   $("autopilot").disabled = !!sim.crash;
   document.body.classList.toggle("piloting", on);
+  touch.sync();
 }
 
 function setPilot(on) {
+  if (loading) return;
+  touch.reset();
   if (on && playCredits?.exhausted) {
     $("credit-dialog").showModal();
     return;
@@ -239,29 +288,54 @@ function setPilot(on) {
   scene.vectors.clear();
   syncPilot();
 }
-function resetWorld(seed = sim.world.seed, type = sim.world.type) {
+async function resetWorld(seed = sim.world.seed, type = sim.world.type) {
+  if (loading) return;
+  loading = true;
+  touch.reset();
+  showLoading("Building your next drive…");
   generation++;
   crashHandled = false;
   $("crash-dialog").close();
   document.body.classList.remove("crashed");
   keys.clear();
-  sim.reset(seed, type);
-  minimap.resetView();
-  planner.reset();
-  previewError = false;
-  lastApplied = 0;
-  lastDecision = null;
-  lastInput = null;
-  lastContext = null;
-  scene.build();
-  scene.vectors.showCandidates = showCandidates;
-  refreshWorld();
-  syncPilot();
-  $("paused-overlay").hidden = true;
-  $("pause").innerHTML = icon("pause");
-  $("pause").setAttribute("aria-label", "Pause simulation");
-  tooltips.set($("pause"), "Pause simulation · P");
-  createIcons({ icons });
+  await nextPaint();
+  try {
+    sim.reset(seed, type);
+    minimap.resetView();
+    planner.reset();
+    previewError = false;
+    lastApplied = 0;
+    lastDecision = null;
+    lastInput = null;
+    lastContext = null;
+    scene.build();
+    scene.vectors.showCandidates = showCandidates;
+    refreshWorld();
+    syncPilot();
+    $("paused-overlay").hidden = true;
+    $("pause").innerHTML = icon("pause");
+    $("pause").setAttribute("aria-label", "Pause simulation");
+    tooltips.set($("pause"), "Pause simulation · P");
+    createIcons({ icons });
+    await finishLoading();
+  } catch (error) {
+    loadingFailed(error);
+  }
+}
+async function finishLoading() {
+  showLoading("Loading car and scenery…");
+  await scene.ready;
+  showLoading("Preparing the road…");
+  await nextPaint();
+  await scene.prepare();
+  await document.fonts.ready;
+  await nextPaint();
+  lastNow = performance.now();
+  loading = false;
+  hideLoading();
+  touch.sync();
+  updateUI();
+  drawMap();
 }
 function changeCamera() {
   const modes = ["chase", "hood", "map"];
@@ -278,8 +352,11 @@ function changeCamera() {
   );
 }
 function togglePause() {
-  if (sim.crash) return;
+  if (sim.crash || loading) return;
+  touch.reset();
+  keys.clear();
   sim.paused = !sim.paused;
+  touch.sync();
   generation++;
   lastApplied = 0;
   nextDecision = 0;
@@ -353,7 +430,7 @@ document.addEventListener("fullscreenchange", () => {
   createIcons({ icons });
 });
 window.addEventListener("keydown", (e) => {
-  if (sim.crash) return;
+  if (sim.crash || loading) return;
   if ($("json-dialog").open || $("help-dialog").open) return;
   if (["INPUT", "SELECT", "TEXTAREA"].includes(e.target.tagName)) return;
   if (e.target.closest("button") && ["Space", "Enter"].includes(e.code)) return;
@@ -379,6 +456,7 @@ window.addEventListener("keydown", (e) => {
   if (e.code === "KeyP") togglePause();
   if (e.key === "?") {
     e.preventDefault();
+    touch.reset();
     $("help-dialog").showModal();
   }
 });
@@ -397,6 +475,7 @@ document.addEventListener("visibilitychange", () => {
 });
 $("close-help").onclick = () => $("help-dialog").close();
 $("scene-json").onclick = () => {
+  touch.reset();
   $("json-dialog").showModal();
   renderJSON();
 };
@@ -567,6 +646,7 @@ function renderJSON() {
 }
 async function decide() {
   if (
+    loading ||
     busy ||
     !sim.autopilot ||
     sim.paused ||
@@ -821,7 +901,9 @@ function updateUI() {
       : stale
         ? "Waiting for a fresh decision"
         : `${Math.round(v.target * 3.6)} km/h target · ${lastDecision.latency_ms} ms`
-    : "WASD to drive · Space to brake";
+    : touch.available
+      ? "Drag to drive · Hold Brake to stop"
+      : "WASD to drive · Space to brake";
   if (
     sim.autopilot &&
     !stale &&
@@ -861,7 +943,8 @@ function animate(now) {
   requestAnimationFrame(animate);
   const dt = Math.min((now - lastNow) / 1000, 0.2);
   lastNow = now;
-  if (document.hidden) return;
+  if (document.hidden || loading) return;
+  touch.sync();
   if (!sim.paused && !sim.crash) {
     if (!sim.autopilot) {
       let steer = 0;
@@ -871,9 +954,9 @@ function animate(now) {
       let throttle = 0;
       if (keys.has("KeyW") || keys.has("ArrowUp")) throttle = 1;
       if (keys.has("KeyS") || keys.has("ArrowDown")) throttle = -1;
-      sim.pedals.throttle = throttle;
-      sim.pedals.brake = keys.has("Space") ? 1 : 0;
-      sim.steeringInput = steer;
+      sim.pedals.throttle = throttle || touch.throttle;
+      sim.pedals.brake = keys.has("Space") ? 1 : touch.brake;
+      sim.steeringInput = steer || touch.steering;
       sim.player.target = 0;
     } else if (!lastApplied || now - lastApplied > 1800) sim.player.target = 0;
     // Preserve real elapsed time on slower displays using bounded physics substeps.
@@ -924,7 +1007,10 @@ function animate(now) {
     requestPreview();
   }
   scene.render(dt);
-  if (!$("minimap").hidden) drawMap();
+  if (!$("minimap").hidden && now - lastMapDraw >= 100) {
+    drawMap();
+    lastMapDraw = now;
+  }
   uiTime += dt;
   if (uiTime > 0.2) {
     uiTime = 0;
@@ -935,6 +1021,7 @@ refreshWorld();
 syncPilot();
 updateUI();
 requestAnimationFrame(animate);
+finishLoading().catch(loadingFailed);
 setInterval(decide, 25);
 fetch("/api/status")
   .then((r) => r.json())

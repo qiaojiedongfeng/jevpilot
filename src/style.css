@@ -1164,6 +1164,226 @@ body.crashed .world-picker {
   background: #007aff15;
 }
 
+.touch-controls,
+.touch-help {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  .glass {
+    background: #f8f9fa;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .touch-help {
+    display: block;
+    margin: 16px 0;
+  }
+  .bottom-hud {
+    bottom: calc(11px + env(safe-area-inset-bottom));
+  }
+  .touch-controls:not([hidden]) {
+    position: fixed;
+    z-index: 7;
+    left: max(20px, env(safe-area-inset-left));
+    right: max(20px, env(safe-area-inset-right));
+    bottom: calc(
+      var(--dock-height, 116px) + 30px + env(safe-area-inset-bottom)
+    );
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+  }
+  .touch-steering {
+    position: relative;
+  }
+  .touch-stick {
+    position: relative;
+    width: clamp(84px, 24dvh, 124px);
+    aspect-ratio: 1;
+    border-radius: 50%;
+    border: 1px solid #ffffffa6;
+    background: #f8f9fa45;
+    box-shadow:
+      inset 0 0 0 8px #ffffff18,
+      0 2px 14px #00000018;
+    pointer-events: auto;
+    touch-action: none;
+  }
+  .touch-stick > span:not(.touch-knob) {
+    position: absolute;
+    color: #fff;
+    font: 18px system-ui;
+    text-shadow: 0 1px 3px #0008;
+  }
+  .stick-up {
+    top: 4px;
+    left: calc(50% - 6px);
+  }
+  .stick-down {
+    bottom: 4px;
+    left: calc(50% - 6px);
+  }
+  .stick-left {
+    left: 9px;
+    top: calc(50% - 13px);
+  }
+  .stick-right {
+    right: 9px;
+    top: calc(50% - 13px);
+  }
+  .touch-knob {
+    position: absolute;
+    inset: 32%;
+    border-radius: 50%;
+    background: #f8f9faf0;
+    border: 1px solid #fff;
+    box-shadow: 0 3px 10px #0003;
+    transform: translate(var(--stick-x, 0px), var(--stick-y, 0px));
+    transition: transform 140ms ease-out;
+    pointer-events: none;
+  }
+  .touch-stick.held .touch-knob {
+    transition: none;
+  }
+  .touch-hint {
+    position: absolute;
+    top: calc(100% + 5px);
+    width: 100%;
+    text-align: center;
+    font-size: 10px;
+    color: white;
+    text-shadow: 0 1px 4px #000;
+  }
+  .touch-brake {
+    width: 64px;
+    height: 64px;
+    flex-direction: column;
+    gap: 1px;
+    border-radius: 50%;
+    border: 1px solid #ffffffb3;
+    background: #f8f9fabf;
+    color: #171a20;
+    font-size: 10px;
+    box-shadow: 0 2px 12px #0002;
+    pointer-events: auto;
+    touch-action: none;
+  }
+  .touch-brake > span {
+    font-size: 22px;
+  }
+  .touch-brake.held {
+    background: #e82127;
+    color: white;
+  }
+}
+
+@media (max-width: 650px), (pointer: coarse) {
+  .topbar {
+    top: calc(13px + env(safe-area-inset-top));
+    left: max(10px, env(safe-area-inset-left));
+    width: min(210px, calc(52% - 14px));
+    max-width: none;
+    height: 44px;
+    padding: 5px 6px;
+    gap: 4px;
+    border-radius: 10px;
+  }
+  .brand b {
+    display: none;
+  }
+  .brand-mark {
+    width: 20px;
+    height: 20px;
+  }
+  .world-picker {
+    flex: 1;
+    border: 0;
+    padding: 0;
+    height: 32px;
+    gap: 0;
+  }
+  .world-picker select {
+    flex: 1;
+    width: 0;
+    font-size: 10px;
+    padding: 0;
+    text-overflow: ellipsis;
+  }
+  .world-picker > button,
+  #github-link {
+    flex-shrink: 0;
+    width: 28px;
+    height: 32px;
+    padding: 5px;
+  }
+  .world-picker svg {
+    width: 14px;
+    height: 14px;
+  }
+  .navigation-hud {
+    top: calc(13px + env(safe-area-inset-top));
+    right: max(10px, env(safe-area-inset-right));
+    width: min(240px, calc(48% - 14px));
+    max-width: none;
+    gap: 8px;
+  }
+  .navigation-card {
+    width: 100%;
+    height: 44px;
+    min-height: 44px;
+    padding: 5px 6px;
+    gap: 5px;
+    border-radius: 10px;
+  }
+  .navigation-card > div {
+    flex: 1;
+    min-width: 0;
+  }
+  .navigation-card strong {
+    display: block;
+    font-size: 10px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .navigation-card > div > span {
+    font-size: 9px;
+    margin-top: 2px;
+  }
+  .navigation-card > span:first-child,
+  .navigation-card > span:first-child svg {
+    width: 18px;
+    height: 18px;
+  }
+  .navigation-card > button {
+    padding: 4px 0;
+    width: 20px;
+    min-height: 32px;
+  }
+  .navigation-card > button svg {
+    width: 14px;
+  }
+  .nav-divider,
+  #remaining {
+    display: none;
+  }
+  .minimap {
+    width: min(148px, 100%);
+  }
+  .minimap-toolbar {
+    height: 32px;
+  }
+  .minimap-toolbar button {
+    min-width: 28px;
+    height: 30px;
+  }
+}
+
 #sign-out[hidden] {
   display: none;
 }

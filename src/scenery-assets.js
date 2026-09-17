@@ -2,13 +2,15 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { materials } from "./materials.js";
 import { rng } from "./math.js";
+import { assetManager } from "./asset-loading.js";
+import { renderProfile } from "./render-profile.js";
 
 const assets = new Map();
 function loadAsset(name, file) {
   if (!assets.has(name))
     assets.set(
       name,
-      new GLTFLoader()
+      new GLTFLoader(assetManager)
         .loadAsync(`/models/${name}/${file}.glb`)
         .then(({ scene }) => {
           scene.updateMatrixWorld(true);
@@ -29,7 +31,8 @@ function loadAsset(name, file) {
             if (!mesh.isMesh) return;
             const material = mesh.material;
             for (const value of Object.values(material))
-              if (value?.isTexture) value.anisotropy = 4;
+              if (value?.isTexture)
+                value.anisotropy = Math.min(4, renderProfile.anisotropy);
             material.envMapIntensity = 0.5;
             materials.set(`scenery:${material.uuid}`, material);
             parts.push({
@@ -56,9 +59,9 @@ export class SceneryAssets {
     this.treeMeshes = [];
     this.treeObjects = world.objects.filter((o) => o.type === "tree");
     this.ready = Promise.allSettled([
-      this.trees(),
+      renderProfile.detailedFoliage && this.trees(),
       this.streetlights(),
-      this.shrubs(),
+      renderProfile.detailedFoliage && this.shrubs(),
     ]).then((results) => {
       for (const result of results)
         if (result.status === "rejected")
@@ -101,8 +104,9 @@ export class SceneryAssets {
     for (const mesh of this.treeMeshes) mesh.count = 0;
   }
   async streetlights() {
+    if (this.world.type === "highway") return;
     const parts = await loadAsset("street_lamp_01", "lamp");
-    if (!this.active || this.world.type === "highway") return;
+    if (!this.active) return;
     const locations = [];
     for (const edge of this.world.edges) {
       const a = this.world.byId[edge.a],

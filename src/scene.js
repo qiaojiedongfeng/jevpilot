@@ -17,9 +17,11 @@ import { Vegetation } from "./vegetation.js";
 import { loadHeroCar, updateHeroWheels } from "./model-assets.js";
 import { detailedCar } from "./vehicle-model.js";
 import { HDRLoader } from "three/addons/loaders/HDRLoader.js";
+import { assetManager, assetsReady } from "./asset-loading.js";
+import { renderProfile, mobileGraphics } from "./render-profile.js";
 let daylight;
 function daylightEnvironment() {
-  return (daylight ||= new HDRLoader()
+  return (daylight ||= new HDRLoader(assetManager)
     .loadAsync("/textures/daylight.hdr")
     .then((texture) => {
       texture.mapping = THREE.EquirectangularReflectionMapping;
@@ -276,18 +278,30 @@ export class DriveScene {
     this.showSensors = false;
     this.renderer = new THREE.WebGLRenderer({
       canvas,
-      antialias: true,
+      antialias: renderProfile.antialias,
       alpha: false,
       powerPreference: "high-performance",
     });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+    this.renderer.setPixelRatio(
+      Math.min(devicePixelRatio, renderProfile.pixelRatio),
+    );
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.autoUpdate = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.95;
-    this.camera = new THREE.PerspectiveCamera(52, 1, 0.1, 1200);
+    this.camera = new THREE.PerspectiveCamera(
+      52,
+      1,
+      0.1,
+      mobileGraphics ? 700 : 1200,
+    );
+    this.viewport = { width: canvas.clientWidth, height: canvas.clientHeight };
+    this.resizeObserver = new ResizeObserver(([entry]) => {
+      this.viewport = entry.contentRect;
+    });
+    this.resizeObserver.observe(canvas);
     this.build();
   }
   build() {
@@ -305,7 +319,7 @@ export class DriveScene {
       });
     this.scene = new THREE.Scene();
     const builtScene = this.scene;
-    daylightEnvironment()
+    const environmentReady = daylightEnvironment()
       .then((texture) => {
         if (this.scene !== builtScene) return;
         builtScene.environment = builtScene.background = texture;
@@ -317,12 +331,15 @@ export class DriveScene {
         console.warn("Daylight environment unavailable", error),
       );
     this.scene.background = new THREE.Color("#b7c9db");
-    this.scene.fog = new THREE.Fog("#b7c6d0", 230, 1050);
+    this.scene.fog = new THREE.Fog("#b7c6d0", 230, mobileGraphics ? 650 : 1050);
     this.scene.add(new THREE.HemisphereLight("#d5e4f8", "#4e503a", 0.4));
     this.sun = new THREE.DirectionalLight("#fff0d9", 3.4);
     this.sun.position.set(-60, 110, 40);
     this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(2048, 2048);
+    this.sun.shadow.mapSize.set(
+      renderProfile.shadowSize,
+      renderProfile.shadowSize,
+    );
     Object.assign(this.sun.shadow.camera, {
       left: -65,
       right: 65,
@@ -789,7 +806,7 @@ export class DriveScene {
     this.wheelDirection = Math.sign(this.sim.player.speed) || 1;
     this.scene.add(this.player);
     const playerGroup = this.player;
-    loadHeroCar()
+    const carReady = loadHeroCar()
       .then((model) => {
         if (this.player !== playerGroup || this.sim.crash) {
           model.traverse((mesh) => mesh.geometry?.dispose());
@@ -841,6 +858,20 @@ export class DriveScene {
     this.vectors = new RoadVectors(this.scene, this.vectorLayer);
     this.renderer.shadowMap.needsUpdate = true;
     this.snap = true;
+    this.ready = Promise.all([environmentReady, carReady, this.scenery.ready]);
+  }
+  async prepare() {
+    await this.ready;
+    await assetsReady();
+    this.render(0, false);
+    // Prepare shaders and upload assets behind the loader, before driving starts.
+    await this.renderer.compileAsync(this.scene, this.camera);
+    this.render(0);
+  }
+  dispose() {
+    this.resizeObserver.disconnect();
+    this.scenery.active = false;
+    this.renderer.dispose();
   }
   buildHighway(group, world) {
     const pts = world.roadSamples;
@@ -960,8 +991,9 @@ export class DriveScene {
       );
     }
   }
-  render(dt) {
-    const { width, height } = this.canvas.getBoundingClientRect();
+  render(dt, draw = true) {
+    const { width, height } = this.viewport;
+    if (!width || !height) return;
     if (
       this.canvas.width !== Math.floor(width * this.renderer.getPixelRatio()) ||
       this.canvas.height !== Math.floor(height * this.renderer.getPixelRatio())
@@ -1124,6 +1156,6 @@ export class DriveScene {
       this.sim.paused,
     );
 
-    this.renderer.render(this.scene, this.camera);
+    if (draw) this.renderer.render(this.scene, this.camera);
   }
 }

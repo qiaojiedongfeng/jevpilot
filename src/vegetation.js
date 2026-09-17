@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { rng } from "./math.js";
 import { pbr, metricUV, materials } from "./materials.js";
+import { renderProfile, mobileGraphics } from "./render-profile.js";
 
 function leafTexture() {
   const canvas = document.createElement("canvas");
@@ -152,7 +153,7 @@ export class Vegetation {
     const key = `${Math.floor(tree.x / 70)}:${Math.floor(tree.z / 70)}`;
     const leaves = this.leaves.get(key) || [];
     const pine = tree.kind === "pine";
-    for (let i = 0; i < 120; i++) {
+    for (let i = 0; i < renderProfile.leafCards; i++) {
       const a = r() * Math.PI * 2,
         u = r();
       const radial =
@@ -206,7 +207,7 @@ export class Vegetation {
       mesh.computeBoundingSphere();
       this.scene.add(mesh);
     }
-    this.grass();
+    if (!mobileGraphics) this.grass();
   }
   grass() {
     const r = this.random,
