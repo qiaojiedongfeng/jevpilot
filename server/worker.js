@@ -1,7 +1,14 @@
-import { cookie, platform, readCookie, sign, verify } from "./auth.js";
+import {
+  authenticatedUserId,
+  SESSION_COOKIE as SESSION,
+  cookie,
+  platform,
+  readCookie,
+  sign,
+  verify,
+} from "./auth.js";
 export { PlayAccount } from "./account.js";
 
-const SESSION = "__Host-jevpilot";
 const STATE = "__Host-jevpilot-oauth";
 const json = (data, status = 200) =>
   Response.json(data, { status, headers: { "Cache-Control": "no-store" } });
@@ -135,29 +142,35 @@ async function handle(request, env) {
   // The login and public source/assets contain no credentials or user data.
   if (path === "/login" || path === "/login.html")
     return env.ASSETS.fetch(request);
-  const session = await verify(
-    env.SESSION_SECRET,
-    readCookie(request, SESSION),
-  );
-  if (
-    typeof session?.user_id !== "string" ||
-    !/^[a-zA-Z0-9_-]{1,128}$/.test(session.user_id)
-  ) {
+  // Protected hosted requests (including decide) must pass this gate before
+  // reading its body or resolving a play account. Local Vite uses jevMiddleware.
+  const userId = await authenticatedUserId(request, env.SESSION_SECRET);
+  if (!userId) {
     return path.startsWith("/api/")
-      ? json({ error: "Sign in to drive.", authenticated: false }, 401)
+      ? json(
+          {
+            error: "Sign in to drive.",
+            auth_required: true,
+            authenticated: false,
+          },
+          401,
+        )
       : redirect(`${origin}/login`);
   }
-  const account = env.PLAY_ACCOUNTS.get(
-    env.PLAY_ACCOUNTS.idFromName(session.user_id),
-  );
+  const account = env.PLAY_ACCOUNTS.get(env.PLAY_ACCOUNTS.idFromName(userId));
   if (path === "/api/status" && request.method === "GET") {
     const snapshot = await account.snapshot();
     if (!snapshot)
       return json(
-        { authenticated: false, error: "Please sign in again." },
+        {
+          auth_required: true,
+          authenticated: false,
+          error: "Please sign in again.",
+        },
         401,
       );
     return json({
+      auth_required: true,
       authenticated: true,
       ...snapshot,
       configured: !!env.TYPESAFE_API_KEY,

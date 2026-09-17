@@ -147,9 +147,15 @@ export async function evaluate(state, env, signal, onUsage) {
   };
 }
 export function jevMiddleware(env) {
+  // Mounted only by Vite dev/preview. The deployed Worker always requires login.
   let active = 0;
   return async (req, res, next) => {
-    if (!req.url?.startsWith("/api/")) return next();
+    const path = new URL(req.url, "http://localhost").pathname;
+    if (["/login", "/login.html"].includes(path) && req.method === "GET") {
+      res.writeHead(302, { Location: "/", "Cache-Control": "no-store" });
+      return res.end();
+    }
+    if (!path.startsWith("/api/")) return next();
     const send = (code, value) => {
       res.writeHead(code, {
         "Content-Type": "application/json",
@@ -157,8 +163,10 @@ export function jevMiddleware(env) {
       });
       res.end(JSON.stringify(value));
     };
-    if (req.url === "/api/status" && req.method === "GET")
+    if (path === "/api/status" && req.method === "GET")
       return send(200, {
+        auth_required: false,
+        authenticated: false,
         configured: !!env.TYPESAFE_API_KEY,
         model: "jev-latest",
         pricing: {
@@ -166,7 +174,7 @@ export function jevMiddleware(env) {
           output_per_million: Number(env.JEV_OUTPUT_PRICE ?? 0),
         },
       });
-    if (req.url !== "/api/decide" || req.method !== "POST")
+    if (path !== "/api/decide" || req.method !== "POST")
       return send(404, { error: "Not found" });
     if (!env.TYPESAFE_API_KEY)
       return send(503, {

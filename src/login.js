@@ -36,6 +36,7 @@ document.getElementById("signup").addEventListener("submit", async (event) => {
 fetch("/api/status")
   .then((r) => r.json())
   .then((data) => {
-    if (data.authenticated) location.replace("/");
+    if (data.auth_required === false || data.authenticated)
+      location.replace("/");
   })
   .catch(() => {});

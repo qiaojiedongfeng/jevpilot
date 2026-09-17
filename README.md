@@ -6,6 +6,8 @@ A demo project showing Tesla Autopilot-like behavior using [Jev by TypeSafe AI](
 
 [Try JevPilot](https://jevpilot.standardagents.ai) — sign in with Standard Agents for $0.25 of free Jev play credit. Joining the early-access list is optional.
 
+The hosted `/api/decide` endpoint requires a valid login session. The browser sends its secure, HttpOnly session cookie; the Jev API key stays on the server.
+
 **Interstate 08:** start in Millbrook, turn onto the signed on-ramp, merge, cruise, and exit into Cedar Town for the final stop.
 
 ## How it works
@@ -29,7 +31,15 @@ cp .env.example .env
 npm run dev
 ```
 
-Open [localhost:5173](http://localhost:5173). Your API key stays server-side in the gitignored `.env`.
+Add your own [TypeSafe AI](https://typesafe.ai/) API key to `.env`:
+
+```dotenv
+TYPESAFE_API_KEY=your_key_here
+```
+
+Open [localhost:5173](http://localhost:5173). **Local development skips all login, signup, and demo credit limits.** No Standard Agents OAuth credentials are needed. Jev calls use your own key and TypeSafe account billing; free play works without a key. The key stays server-side in the gitignored `.env`—never use a `VITE_` variable for it.
+
+This also applies to `npm run preview` after `npm run build`. Restart the local server after changing `.env`.
 
 **J** toggles autopilot · **WASD** to drive · **Space** to brake.
 

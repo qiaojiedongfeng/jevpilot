@@ -1,4 +1,5 @@
 const encoder = new TextEncoder();
+export const SESSION_COOKIE = "__Host-jevpilot";
 const encode = (bytes) =>
   btoa(String.fromCharCode(...bytes))
     .replaceAll("+", "-")
@@ -58,6 +59,13 @@ export function readCookie(request, name) {
       .find((c) => c.startsWith(`${name}=`))
       ?.slice(name.length + 1) || null
   );
+}
+export async function authenticatedUserId(request, secret) {
+  const session = await verify(secret, readCookie(request, SESSION_COOKIE));
+  return typeof session?.user_id === "string" &&
+    /^[a-zA-Z0-9_-]{1,128}$/.test(session.user_id)
+    ? session.user_id
+    : null;
 }
 export function cookie(name, value, seconds) {
   return `${name}=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${seconds}`;

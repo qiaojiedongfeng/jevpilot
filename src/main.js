@@ -83,6 +83,7 @@ let playCredits = null,
   lastMapDraw = 0;
 showLoading("Loading car and scenery…");
 let configured = false,
+  authRequired = true,
   busy = false,
   generation = 0,
   lastDecision = null,
@@ -680,18 +681,19 @@ async function decide() {
     lastInput = inspectRequest(state);
     const res = await fetch("/api/decide", {
         method: "POST",
+        credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ state, request_id: crypto.randomUUID() }),
         signal: AbortSignal.timeout(12000),
       }),
       data = await res.json();
     updateCredits(data.credits);
-    if (res.status === 401) {
+    if (res.status === 401 && authRequired) {
       setPilot(false);
       location.assign("/login");
       return;
     }
-    if (res.status === 402) {
+    if (res.status === 402 && authRequired) {
       setPilot(false);
       $("credit-dialog").showModal();
       return;
@@ -1023,10 +1025,11 @@ updateUI();
 requestAnimationFrame(animate);
 finishLoading().catch(loadingFailed);
 setInterval(decide, 25);
-fetch("/api/status")
+fetch("/api/status", { credentials: "same-origin" })
   .then((r) => r.json())
   .then((data) => {
-    if (data.authenticated === false) {
+    authRequired = data.auth_required !== false;
+    if (authRequired && data.authenticated !== true) {
       location.replace("/login");
       return;
     }
