@@ -256,11 +256,11 @@ export function generateWorld(seed, type = "town") {
   };
   world.route = makeRoute(world, [
     startNode.id,
-    ...shortestPath(world, nextNode.id, destination.id),
+    ...shortestPath(world, nextNode.id, destination.id, startNode.id),
   ]);
   return world;
 }
-export function shortestPath(world, start, end) {
+export function shortestPath(world, start, end, previousNode = null) {
   const cost = { [start]: 0 },
     prev = {},
     todo = new Set(world.nodes.map((p) => p.id));
@@ -272,6 +272,9 @@ export function shortestPath(world, start, end) {
     if (u === end) break;
     todo.delete(u);
     for (const v of world.byId[u].neighbors) {
+      // Preserve the incoming direction when planning a new trip. The remaining
+      // shortest path has no backtracking, so the initial route has no U-turns.
+      if (u === start && v === previousNode) continue;
       const c = cost[u] + dist(world.byId[u], world.byId[v]);
       if (c < (cost[v] ?? Infinity)) {
         cost[v] = c;

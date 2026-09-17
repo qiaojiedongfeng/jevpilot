@@ -76,6 +76,77 @@ function label(text, bg = "#f2eee4", fg = "#304c46", w = 128, h = 64) {
   ctx.fillText(text, w / 2, h / 2);
   return new THREE.CanvasTexture(c);
 }
+function interstateGuide({ text, detail, direction = "straight" }) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 768;
+  canvas.height = 384;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#126b48";
+  ctx.fillRect(0, 0, 768, 384);
+  ctx.strokeStyle = "#fffef3";
+  ctx.lineWidth = 7;
+  ctx.beginPath();
+  ctx.roundRect(13, 13, 742, 358, 14);
+  ctx.stroke();
+  // A red-and-blue interstate shield, separate from the destination legend.
+  const shield = new Path2D();
+  shield.moveTo(52, 78);
+  shield.quadraticCurveTo(133, 53, 214, 78);
+  shield.lineTo(209, 184);
+  shield.bezierCurveTo(203, 218, 159, 247, 133, 257);
+  shield.bezierCurveTo(107, 247, 63, 218, 57, 184);
+  shield.closePath();
+  ctx.fillStyle = "#17468c";
+  ctx.fill(shield);
+  ctx.save();
+  ctx.clip(shield);
+  ctx.fillStyle = "#bd2637";
+  ctx.fillRect(40, 50, 190, 68);
+  ctx.restore();
+  ctx.stroke(shield);
+  ctx.beginPath();
+  ctx.moveTo(54, 118);
+  ctx.lineTo(212, 118);
+  ctx.lineWidth = 4;
+  ctx.stroke();
+  ctx.fillStyle = "#fffef3";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = "bold 20px sans-serif";
+  ctx.fillText("INTERSTATE", 133, 96);
+  ctx.font = "bold 86px sans-serif";
+  ctx.fillText("08", 133, 179);
+  ctx.textAlign = "left";
+  ctx.font = "bold 37px sans-serif";
+  ctx.fillText("NORTH", 263, 88);
+  ctx.font = "bold 39px sans-serif";
+  ctx.fillText(text || "Cedar Town", 263, 151, 348);
+  ctx.font = "bold 22px sans-serif";
+  ctx.fillText(detail || "INTERSTATE 08", 52, 319, 660);
+  ctx.save();
+  ctx.translate(668, 168);
+  ctx.rotate(
+    direction === "left"
+      ? -Math.PI / 2
+      : direction === "right"
+        ? Math.PI / 2
+        : 0,
+  );
+  ctx.beginPath();
+  ctx.moveTo(0, -52);
+  ctx.lineTo(-34, -12);
+  ctx.lineTo(-13, -12);
+  ctx.lineTo(-13, 44);
+  ctx.lineTo(13, 44);
+  ctx.lineTo(13, -12);
+  ctx.lineTo(34, -12);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
 function mergeModel(group) {
   group.updateMatrixWorld(true);
   const batches = new Map();
@@ -322,7 +393,9 @@ export class DriveScene {
           "#b6c0b0",
         );
     }
-    for (const n of world.type === "highway" ? [] : world.nodes) {
+    for (const n of world.nodes.filter(
+      (node) => world.type !== "highway" || node.townJunction,
+    )) {
       box(s, 12.1, 0.1, 12.1, n.x, 0.018, n.z, "#73817e");
       for (const id of n.neighbors) {
         const b = world.byId[id],
@@ -398,19 +471,29 @@ export class DriveScene {
         for (const x of [-14, 14]) cyl(s, 0.14, 8, o.x + x, 4, o.z, "#8e9f95");
         box(s, 28, 0.25, 0.25, o.x, 8, o.z, "#8e9f95");
         const sign = new THREE.Mesh(
-          new THREE.PlaneGeometry(10, 2.3),
+          new THREE.PlaneGeometry(9, 4.5),
           new THREE.MeshBasicMaterial({
-            map: label(
-              o.text || "INTERSTATE 08",
-              "#3a755d",
-              "#eef7e3",
-              512,
-              128,
-            ),
+            map: interstateGuide(o),
             side: THREE.FrontSide,
           }),
         );
-        sign.position.set(o.x + 6, 7, o.z);
+        sign.position.set(o.x + 6, 7.2, o.z);
+        s.add(sign);
+        continue;
+      }
+      if (o.type === "interstate_guide") {
+        const sign = new THREE.Group();
+        sign.position.set(o.x, 0, o.z);
+        sign.rotation.y = -o.approach;
+        for (const x of [-2.1, 2.1])
+          cyl(sign, 0.09, 4.5, x, 2.25, 0, "#8e9f95");
+        box(sign, 6.4, 3.2, 0.13, 0, 4.3, 0, "#8e9f95");
+        const face = new THREE.Mesh(
+          new THREE.PlaneGeometry(6.4, 3.2),
+          new THREE.MeshBasicMaterial({ map: interstateGuide(o) }),
+        );
+        face.position.set(0, 4.3, 0.075);
+        sign.add(face);
         s.add(sign);
         continue;
       }
@@ -833,6 +916,8 @@ export class DriveScene {
     strip(0, 0.25, "#bac5b7", 0.8);
     for (const road of world.connectorRoads || []) {
       const path = road.points;
+      const inJunction = (p) =>
+        world.nodes.some((n) => n.townJunction && dist(n, p) < 11);
       if (road.twoWay) strip(0, road.width + 3.6, "#d8d6c9", 0.012, path);
       strip(0, road.width, "#70817c", 0.05, path);
       for (const side of [-1, 1]) {
@@ -844,9 +929,10 @@ export class DriveScene {
           "#e5e9d8",
           0.085,
           path,
-          ["merge", "exit"].includes(road.kind)
-            ? (p) => Math.floor(p.s / 4) % 2 === 1
-            : null,
+          (p) =>
+            inJunction(p) ||
+            (["merge", "exit"].includes(road.kind) &&
+              Math.floor(p.s / 4) % 2 === 1),
         );
       }
       if (road.twoWay)
@@ -856,7 +942,7 @@ export class DriveScene {
           "#d5d7b4",
           0.087,
           path,
-          (p) => Math.floor(p.s / 4) % 2 === 1,
+          (p) => inJunction(p) || Math.floor(p.s / 4) % 2 === 1,
         );
     }
     if (world.destinationStopLine) {

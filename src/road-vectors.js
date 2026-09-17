@@ -266,7 +266,9 @@ export class RoadVectors {
       const end =
         points[Math.floor(VECTOR_STEPS * (0.55 + (index % 4) * 0.12))];
       const screen = new THREE.Vector3(end.x, 0.7, end.z).project(camera);
+      const probability = weights?.[id]?.probability;
       item.label.hidden =
+        probability === undefined ||
         !candidate.velocity_mps ||
         screen.z > 1 ||
         screen.z < 0 ||
@@ -274,12 +276,9 @@ export class RoadVectors {
         Math.abs(screen.y) > 1;
       item.label.dataset.vector = id;
       item.label.classList.toggle("selected", selected);
-      const probability = weights?.[id]?.probability;
       index++;
-      const number = id.endsWith("_stop")
-        ? CANDIDATE_COUNT
-        : Number(id.split("_v")[1]) + 1;
-      item.label.textContent = `${number}${probability === undefined ? "" : ` · ${Math.round(probability * 100)}%`}`;
+      item.label.textContent =
+        probability === undefined ? "" : `${Math.round(probability * 100)}%`;
       item.label.setAttribute(
         "aria-label",
         `${candidateName(candidate)}, ${Math.abs(candidate.velocity_mps).toFixed(1)} meters per second${selected ? ", selected" : ""}`,

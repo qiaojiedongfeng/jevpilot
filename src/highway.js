@@ -73,7 +73,8 @@ function cubic(a, b, c, d) {
 // junctions produces a different curve and moves traffic away from its lane.
 export function makeHighwayRoute(world, ids, laneOffset = 9) {
   const points = [],
-    sections = [];
+    sections = [],
+    crossings = [];
   const append = (path) => {
     for (const p of path) {
       const last = points.at(-1);
@@ -89,7 +90,14 @@ export function makeHighwayRoute(world, ids, laneOffset = 9) {
     );
     if (!edge) throw Error(`No drivable connection from ${a} to ${b}`);
     let path;
-    if (edge.path) path = edge.a === a ? edge.path : [...edge.path].reverse();
+    if (edge.path)
+      path =
+        edge.a === a
+          ? edge.path
+          : samplePolyline(
+              offsetPath([...edge.centerline].reverse(), edge.laneOffset),
+              1.5,
+            );
     else {
       const start = nearestOnPath(world.byId[a], world.roadSamples).s;
       const end = nearestOnPath(world.byId[b], world.roadSamples).s;
@@ -103,7 +111,55 @@ export function makeHighwayRoute(world, ids, laneOffset = 9) {
       if (end < start) center.reverse();
       path = offsetPath(center, laneOffset);
     }
+    const junction = world.byId[a];
+    let corner = null;
+    if (
+      i > 0 &&
+      (junction.townJunction ||
+        (edge.kind === "local" && sections.at(-1)?.kind === "local"))
+    ) {
+      const approach = heading(points.at(-2), points.at(-1));
+      const exit = heading(path[0], path[1]);
+      if (junction.townJunction)
+        crossings.push({
+          nodeId: a,
+          x: junction.x,
+          z: junction.z,
+          approach,
+          exit,
+        });
+      if (Math.abs(Math.sin(exit - approach)) > 0.1) {
+        // Join the right-hand lane to the actual outgoing road through the
+        // intersection, rather than splicing two lane endpoints at a sharp angle.
+        const rightTurn = Math.sin(exit - approach) > 0;
+        const inset = rightTurn ? 11 : 14;
+        const entry = pointAt(points, points.at(-1).s - inset);
+        const leaving = pointAt(path, inset);
+        while (points.at(-1).s > entry.s) points.pop();
+        append([entry]);
+        sections.at(-1).endS = points.at(-1).s;
+        const bend =
+          Math.abs(Math.sin(approach)) > 0.5
+            ? { x: leaving.x, z: entry.z }
+            : { x: entry.x, z: leaving.z };
+        corner = cubic(
+          entry,
+          rightTurn
+            ? { x: (entry.x + 2 * bend.x) / 3, z: (entry.z + 2 * bend.z) / 3 }
+            : move(entry, approach, 9),
+          rightTurn
+            ? {
+                x: (leaving.x + 2 * bend.x) / 3,
+                z: (leaving.z + 2 * bend.z) / 3,
+              }
+            : move(leaving, exit, -9),
+          leaving,
+        );
+        path = path.filter((p) => p.s > inset);
+      }
+    }
     const startS = points.at(-1)?.s ?? 0;
+    if (corner) append(corner);
     append(path);
     const previous = sections.at(-1);
     if (previous?.kind === edge.kind && previous.speedLimit === edge.speedLimit)
@@ -118,7 +174,15 @@ export function makeHighwayRoute(world, ids, laneOffset = 9) {
         laneHalfWidth: edge.kind === "interstate" ? 2.25 : 3,
       });
   }
-  return { ids, points, sections, crossings: [], length: points.at(-1).s };
+  for (const crossing of crossings) {
+    const line = move(
+      move(crossing, crossing.approach, -10.5),
+      crossing.approach + Math.PI / 2,
+      3,
+    );
+    crossing.stopS = nearestOnPath(line, points).s;
+  }
+  return { ids, points, sections, crossings, length: points.at(-1).s };
 }
 
 export function generateHighway(seed, theme) {
@@ -175,7 +239,21 @@ export function generateHighway(seed, theme) {
     return node;
   };
   const start = addNode("local-start", { x: startX, z: 660 });
-  const ramp = addNode("onramp", { x: startX, z: 565 });
+  const market = addNode("mill-market", { x: startX, z: 600 });
+  const rampJunction = addNode("mill-interchange", { x: startX, z: 520 });
+  const ramp = addNode("onramp", { x: startX - 38, z: 520 });
+  const north = addNode("mill-north", { x: startX, z: 450 });
+  const south = addNode("mill-south", { x: startX, z: 710 });
+  const eastSouth = addNode("oak-south", { x: startX + 80, z: 710 });
+  const eastMarket = addNode("oak-market", { x: startX + 80, z: 600 });
+  const eastRamp = addNode("oak-interchange", { x: startX + 80, z: 520 });
+  const eastNorth = addNode("oak-north", { x: startX + 80, z: 450 });
+  const marketWest = addNode("market-west", { x: startX - 65, z: 600 });
+  const marketEast = addNode("market-east", { x: startX + 116, z: 600 });
+  for (const junction of [market, rampJunction, eastMarket, eastRamp]) {
+    junction.townJunction = true;
+    junction.control = "stop";
+  }
   const mergeStart = station("h2"),
     mergeEnd = station("h3");
   const merge = addNode("merge-lane", lanePoint(mergeStart, 15));
@@ -195,6 +273,7 @@ export function generateHighway(seed, theme) {
     name,
     offset = 0,
     endInset = 0,
+    twoWay = false,
   ) => {
     const sampled = samplePolyline(surface, 1.5);
     const path = samplePolyline(offsetPath(sampled, offset), 1.5);
@@ -205,31 +284,28 @@ export function generateHighway(seed, theme) {
       path.push(last);
     }
     a.neighbors.push(b.id);
+    if (twoWay) b.neighbors.push(a.id);
     edges.push({
       id: `${a.id}-${b.id}`,
       a: a.id,
       b: b.id,
-      oneWay: true,
+      oneWay: !twoWay,
       width,
       speedLimit: speed,
       kind,
       name,
       length: path.at(-1).s,
       path,
+      ...(twoWay ? { centerline: sampled, laneOffset: offset } : {}),
     });
     connectorRoads.push({
-      id: kind,
+      id: `${a.id}-${b.id}`,
       // Overlap asphalt at joins: independently sampled end tangents otherwise
       // leave a thin wedge that rejects every forward trajectory as off-road.
       // Rendering and occupancy share these points; the route stays unchanged.
-      // The local street also extends behind the entire spawned car.
       points: samplePolyline(
         [
-          move(
-            sampled[0],
-            heading(sampled[0], sampled[1]),
-            kind === "local" ? -18 : -0.25,
-          ),
+          move(sampled[0], heading(sampled[0], sampled[1]), -0.25),
           ...sampled,
           move(sampled.at(-1), heading(sampled.at(-2), sampled.at(-1)), 0.25),
         ],
@@ -240,15 +316,43 @@ export function generateHighway(seed, theme) {
       twoWay: offset !== 0,
     });
   };
-  link(start, ramp, [start, ramp], 12, 10, "local", "Mill Road", 3);
-  const rampStart = { x: ramp.x + 3, z: ramp.z };
+  const street = (a, b, name) =>
+    link(a, b, [a, b], 12, 10, "local", name, 3, 0, true);
+  for (const [a, b] of [
+    [south, start],
+    [start, market],
+    [market, rampJunction],
+    [rampJunction, north],
+  ])
+    street(a, b, "Millbrook · Main Street");
+  for (const [a, b] of [
+    [eastSouth, eastMarket],
+    [eastMarket, eastRamp],
+    [eastRamp, eastNorth],
+  ])
+    street(a, b, "Millbrook · Oak Street");
+  street(marketWest, market, "Millbrook · Market Street");
+  street(market, eastMarket, "Millbrook · Market Street");
+  street(eastMarket, marketEast, "Millbrook · Market Street");
+  street(rampJunction, eastRamp, "Millbrook · Depot Street");
+  street(north, eastNorth, "Millbrook · North Street");
+  street(south, eastSouth, "Millbrook · South Street");
+  link(
+    rampJunction,
+    ramp,
+    [rampJunction, ramp],
+    8,
+    8,
+    "ramp_turn",
+    "Interstate 08 North entrance",
+  );
   const mergeHeading = pointAt(roadSamples, mergeStart).heading;
   link(
     ramp,
     merge,
     cubic(
-      rampStart,
-      move(rampStart, 0, 90),
+      ramp,
+      move(ramp, -Math.PI / 2, 65),
       move(merge, mergeHeading, -85),
       merge,
     ),
@@ -321,8 +425,23 @@ export function generateHighway(seed, theme) {
     [townX + 25, -672, "cottage"],
     [townX - 23, -724, "shop"],
     [townX + 25, -728, "townhouse"],
-    [startX - 23, 630, "cottage"],
-    [startX + 23, 600, "shop"],
+    [startX - 23, 676, "cottage"],
+    [startX - 23, 635, "shop"],
+    [startX + 23, 676, "cottage"],
+    [startX + 23, 635, "shop"],
+    [startX + 57, 676, "townhouse"],
+    [startX + 57, 635, "cottage"],
+    [startX - 23, 574, "shop"],
+    [startX - 23, 547, "shop"],
+    [startX + 23, 574, "townhouse"],
+    [startX + 23, 547, "shop"],
+    [startX + 57, 574, "cottage"],
+    [startX + 57, 547, "modern"],
+    [startX + 103, 657, "cottage"],
+    [startX + 103, 557, "cottage"],
+    [startX - 23, 482, "cottage"],
+    [startX + 23, 482, "modern"],
+    [startX + 57, 482, "cottage"],
   ])
     objects.push({
       id: `building-${objects.length}`,
@@ -344,6 +463,76 @@ export function generateHighway(seed, theme) {
       z,
       height: 6,
     });
+  for (const z of [688, 650, 572, 490])
+    for (const x of [startX - 8, startX + 88])
+      objects.push({
+        id: `millbrook-lamp-${objects.length}`,
+        type: "streetlight",
+        x,
+        z,
+        height: 6,
+      });
+  for (const junction of nodes.filter((n) => n.townJunction))
+    for (const id of junction.neighbors) {
+      if (
+        !edges.some(
+          (edge) =>
+            (edge.a === id && edge.b === junction.id) ||
+            (!edge.oneWay && edge.a === junction.id && edge.b === id),
+        )
+      )
+        continue;
+      const approach = heading(byId[id], junction);
+      const p = move(move(junction, approach, -9), approach + Math.PI / 2, 6.9);
+      objects.push({
+        id: `millbrook-stop-${junction.id}-${id}`,
+        type: "stop_sign",
+        ...p,
+        nodeId: junction.id,
+        approach,
+        height: 2.8,
+      });
+    }
+  objects.push(
+    {
+      id: "millbrook-welcome",
+      type: "town_sign",
+      x: startX + 9,
+      z: 650,
+      text: "MILLBROOK",
+      height: 3,
+    },
+    {
+      id: "interstate-advance",
+      type: "interstate_guide",
+      x: startX + 11,
+      z: 619,
+      approach: 0,
+      direction: "left",
+      text: "Cedar Town",
+      detail: "LEFT AFTER MARKET ST",
+    },
+    {
+      id: "interstate-entrance",
+      type: "interstate_guide",
+      x: startX + 11,
+      z: 538,
+      approach: 0,
+      direction: "left",
+      text: "North entrance",
+      detail: "INTERSTATE 08",
+    },
+    {
+      id: "interstate-ramp",
+      type: "interstate_guide",
+      ...move(ramp, -Math.PI / 2, 15),
+      z: ramp.z - 8,
+      approach: -Math.PI / 2,
+      direction: "straight",
+      text: "Cedar Town",
+      detail: "ACCELERATE TO MERGE",
+    },
+  );
   for (let i = 0; i < 210; i++) {
     const p = {
       x: (random() > 0.5 ? 1 : -1) * (65 + random() * 200),
@@ -385,9 +574,9 @@ export function generateHighway(seed, theme) {
       depth: 13,
       height: 9,
     });
-  for (const [i, text] of [
-    [3, "INTERSTATE 08"],
-    [5, "CEDAR TOWN · EXIT →"],
+  for (const [i, direction, detail] of [
+    [3, "straight", "CONTINUE NORTH"],
+    [5, "right", "EXIT 6 · KEEP RIGHT"],
   ])
     objects.push({
       id: `highway-sign-${i}`,
@@ -396,7 +585,9 @@ export function generateHighway(seed, theme) {
       z: byId[`h${i}`].z + 60,
       width: 18,
       height: 8,
-      text,
+      text: "Cedar Town",
+      direction,
+      detail,
     });
   objects.push({
     id: "cedar-welcome",
@@ -424,11 +615,13 @@ export function generateHighway(seed, theme) {
     zs: [-800, 720],
     bounds: { minX: -370, maxX: 370, minZ: -805, maxZ: 740 },
     startNode: start.id,
-    nextNode: ramp.id,
+    nextNode: market.id,
     destination: destination.id,
   };
   world.route = makeHighwayRoute(world, [
     start.id,
+    market.id,
+    rampJunction.id,
     ramp.id,
     merge.id,
     "h3",

@@ -36,10 +36,12 @@ button {
   padding: 8px;
   border-radius: 7px;
 }
-button:hover {
+button:hover,
+#github-link:hover {
   background: #171a200d;
 }
 button:focus-visible,
+#github-link:focus-visible,
 select:focus-visible,
 input:focus-visible {
   outline: 2px solid var(--accent);
@@ -104,56 +106,41 @@ kbd {
   position: fixed;
   z-index: 5;
   left: 27px;
-  right: 27px;
   top: 22px;
   display: flex;
   align-items: center;
-  gap: 27px;
-  pointer-events: none;
-}
-.topbar > * {
-  pointer-events: auto;
+  gap: 14px;
+  width: max-content;
+  max-width: calc(100% - 54px);
+  height: 48px;
+  padding: 8px 8px 8px 12px;
+  border-radius: 12px;
 }
 .brand {
-  font: 25px "Manrope";
-  letter-spacing: -1px;
+  font: 18px "Manrope";
+  letter-spacing: -0.6px;
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 8px;
+  flex-shrink: 0;
   font-weight: 500;
-  text-shadow: 0 1px 15px #f7f7f799;
 }
 .brand b {
   font-weight: 600;
 }
 .brand-mark {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--accent);
-  color: #ffffff;
-  border-radius: 10px;
-  width: 39px;
-  height: 39px;
-  margin-right: 7px;
-  box-shadow: 0 3px 12px #24272d1a;
-}
-.brand-mark svg {
-  width: 23px;
-  height: 23px;
-}
-.slash {
-  padding: 0 3px;
-  color: #a3a6ab;
+  display: block;
+  width: 26px;
+  height: 26px;
 }
 .world-picker {
   display: flex;
   align-items: center;
-  gap: 9px;
-  border-radius: 10px;
-  padding: 5px 6px 5px 13px;
-  margin-right: auto;
-  height: 43px;
+  gap: 6px;
+  min-width: 0;
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+  height: 28px;
 }
 .world-picker select {
   border: 0;
@@ -161,40 +148,43 @@ kbd {
   font-size: 12px;
   font-weight: 550;
   outline: none;
-  max-width: 160px;
+  max-width: 140px;
+  min-width: 0;
   cursor: pointer;
   padding-right: 5px;
 }
-.world-picker .seed {
-  font: 9px monospace;
-  color: #a3a6ab;
-  padding-left: 5px;
-}
-.world-picker > button {
-  border-left: 1px solid #f7f7f7;
-  border-radius: 0;
+.world-picker > button,
+#github-link {
+  border-radius: 6px;
   width: 34px;
   height: 28px;
   color: #6b7077;
 }
+#github-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
 .world-picker svg {
   width: 15px;
 }
-.top-tools {
+.dock-tools {
   display: flex;
   align-items: center;
+  flex-shrink: 0;
   gap: 2px;
-  padding: 5px;
-  border-radius: 10px;
-  height: 43px;
 }
-.top-tools button {
+.dock-tools button,
+.candidate-button {
   font-size: 11px;
   padding: 7px 10px;
+  min-height: 36px;
   gap: 6px;
   color: #6b7077;
+  white-space: nowrap;
 }
-.top-tools svg {
+.dock-tools svg {
   width: 16px;
   height: 16px;
 }
@@ -204,12 +194,24 @@ kbd {
   background: #f7f7f7;
   margin: 0 2px;
 }
-.navigation-card {
+.navigation-hud {
   position: fixed;
-  top: 87px;
-  left: 27px;
-  z-index: 4;
+  top: 22px;
+  right: 27px;
+  z-index: 6;
   display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  max-width: min(480px, calc(100% - 420px));
+  pointer-events: none;
+}
+.navigation-hud > * {
+  pointer-events: auto;
+}
+.navigation-card {
+  display: flex;
+  max-width: 100%;
   align-items: center;
   gap: 13px;
   border-radius: 10px;
@@ -266,30 +268,32 @@ kbd {
   left: 50%;
   transform: translateX(-50%);
   z-index: 5;
-  width: min(750px, calc(100% - 40px));
+  width: max-content;
+  max-width: calc(100% - 32px);
 }
 .driver-dock {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 15px;
+  gap: 10px;
   border-radius: 15px;
-  padding: 16px 19px;
-  height: 89px;
+  padding: 12px 14px;
+  height: 76px;
 }
 .speed-cluster {
   display: flex;
   align-items: center;
-  gap: 19px;
+  flex-shrink: 0;
+  gap: 12px;
 }
 .speed-cluster > div {
   display: flex;
   flex-direction: column;
   align-items: center;
-  min-width: 65px;
+  min-width: 48px;
 }
 .speed-cluster strong {
-  font: 500 43px/0.98 "Manrope";
+  font: 500 38px/0.98 "Manrope";
   letter-spacing: -2px;
   font-variant-numeric: tabular-nums;
   color: #171a20;
@@ -323,6 +327,21 @@ kbd {
   height: 37px;
   background: #f7f7f7;
   margin: 0 2px;
+}
+.pilot-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 6px;
+}
+.candidate-button {
+  min-height: 41px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.candidate-button svg {
+  width: 20px;
+  height: 20px;
 }
 .pilot-button {
   border: 1px solid #171a20;
@@ -366,9 +385,10 @@ kbd {
 #decision-status {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  min-width: 165px;
-  margin-right: auto;
+  gap: 3px;
+  min-width: 0;
+  width: 160px;
+  flex: 0 1 160px;
 }
 #pilot-state {
   font-size: 12px;
@@ -382,49 +402,22 @@ kbd {
 #context-message {
   font-size: 9px;
   color: #a3a6ab;
-  max-width: 190px;
+  max-width: 160px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.driver-dock > button:not(.pilot-button) {
-  padding: 5px;
-  color: #6b7077;
-}
-.footer-line {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 11px 5px 0;
-  font-size: 9px;
-  color: #44484f;
-  gap: 15px;
-  text-shadow: 0 1px 12px #f7f7f7d9;
-}
-.footer-line > span {
+.cost-total {
   display: flex;
   align-items: center;
   gap: 5px;
   white-space: nowrap;
-}
-#vector-caption {
-  font-size: 8px;
-  letter-spacing: 0.15px;
+  font-size: 9px;
   color: #6b7077;
 }
 .cost-total strong {
-  font: 500 11px monospace;
+  font: 500 10px monospace;
   color: #44484f;
-}
-.dot {
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: #a3a6ab;
-}
-.dot.connected {
-  background: var(--accent);
 }
 .vector-label {
   position: absolute;
@@ -465,11 +458,9 @@ kbd {
   overflow: hidden;
 }
 .minimap {
-  position: fixed;
-  left: 24px;
-  bottom: 24px;
+  position: relative;
   width: 180px;
-  z-index: 4;
+  z-index: 6;
   border-radius: 10px;
   overflow: hidden;
 }
@@ -477,104 +468,52 @@ kbd {
   display: block;
   width: 100%;
   opacity: 0.9;
+  cursor: grab;
+  touch-action: none;
 }
-@media (max-width: 1150px) {
-  .minimap {
-    bottom: 140px;
-  }
-}
-.controls-panel {
-  position: fixed;
-  z-index: 6;
-  bottom: 143px;
-  left: 50%;
-  transform: translateX(95px);
-  width: 280px;
-  border-radius: 12px;
-  padding: 17px 19px;
-}
-.panel-heading {
+.minimap-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  color: #6b7077;
-  font-size: 9px;
-  letter-spacing: 1.2px;
-  margin-bottom: 17px;
+  padding: 4px;
+  border-bottom: 1px solid var(--line);
+  user-select: none;
 }
-.panel-heading button {
-  padding: 1px;
+.minimap-toolbar > div {
+  display: flex;
+  gap: 2px;
 }
-.panel-heading svg {
+.minimap-toolbar button {
+  width: 26px;
+  height: 26px;
+  padding: 5px;
+  color: var(--muted);
+}
+.minimap-toolbar svg {
   width: 15px;
+  height: 15px;
 }
-.controls-panel > label:not(.check-label) {
-  display: flex;
-  justify-content: space-between;
+#map-drag {
+  cursor: grab;
+  touch-action: none;
+}
+.minimap.is-moving #map-drag,
+.minimap.is-panning canvas {
+  cursor: grabbing;
+}
+#control-tooltip {
+  position: fixed;
+  z-index: 30;
+  max-width: min(240px, calc(100vw - 16px));
+  padding: 7px 10px;
+  border: 1px solid #42464e;
+  border-radius: 7px;
+  background: #202329f5;
+  color: #ffffff;
   font-size: 11px;
-  color: #6b7077;
-  margin: 19px 0 10px;
-}
-.controls-panel output {
-  font: 10px monospace;
-  color: #6b7077;
-}
-input[type="range"] {
-  width: 100%;
-  height: 4px;
-  appearance: none;
-  -webkit-appearance: none;
-  background: #e5e7eb;
-  border-radius: 3px;
-  margin: 0;
-  accent-color: var(--accent);
-}
-input[type="range"]::-webkit-slider-thumb {
-  appearance: none;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--accent);
-  border: 2px solid #ffffff;
-  box-shadow: 0 0 0 1px #a3a6ab;
-}
-.range-labels {
-  display: flex;
-  justify-content: space-between;
-  font-size: 7px;
-  letter-spacing: 1px;
-  color: #a3a6ab;
-  margin: 8px 0 20px;
-}
-.check-label {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 10px;
-  color: #6b7077;
-  padding: 8px 0;
-}
-.check-label > span {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.check-label svg {
-  width: 14px;
-  height: 14px;
-}
-.check-label input {
-  accent-color: var(--accent);
-}
-.control-actions {
-  display: flex;
-  gap: 10px;
-  margin-top: 16px;
-  padding-top: 15px;
-  border-top: 1px solid var(--line);
-}
-.control-actions > button:first-child {
-  flex: 1;
+  line-height: 1.4;
+  box-shadow: 0 4px 18px #00000024;
+  pointer-events: none;
 }
 .secondary {
   border: 1px solid #e5e7eb;
@@ -586,17 +525,6 @@ input[type="range"]::-webkit-slider-thumb {
 .secondary svg {
   width: 12px;
   height: 12px;
-}
-.session-stats {
-  display: flex;
-  justify-content: space-between;
-  color: #a3a6ab;
-  font-size: 8px;
-  margin-top: 15px;
-}
-.session-stats b {
-  font-weight: 500;
-  color: #6b7077;
 }
 #paused-overlay {
   position: fixed;
@@ -705,13 +633,6 @@ input[type="range"]::-webkit-slider-thumb {
   border-color: #ff3b30;
   font-weight: 650;
   box-shadow: 0 8px 30px #ff3b3033;
-}
-#connection.error {
-  color: #ff2424;
-  font-weight: 650;
-}
-#connection.error .dot {
-  background: #ff2424;
 }
 dialog {
   padding: 0;
@@ -867,44 +788,30 @@ dialog::backdrop {
 @media (max-width: 950px) {
   .topbar {
     left: 18px;
+    max-width: calc(100% - 36px);
+  }
+  .navigation-hud {
     right: 18px;
-    gap: 16px;
   }
-  .brand {
-    font-size: 22px;
-  }
-  .world-picker .seed {
-    display: none;
-  }
-  .navigation-card {
-    left: 18px;
-  }
-  .minimap {
-    left: 18px;
-  }
-  .top-tools button {
+  .dock-tools button,
+  .candidate-button {
     padding: 7px 8px;
   }
-  .controls-panel {
-    transform: none;
-    left: auto;
-    right: 20px;
+  .dock-tools button > span {
+    display: none;
   }
   .bottom-hud {
-    width: min(720px, calc(100% - 30px));
+    max-width: calc(100% - 30px);
   }
   .driver-dock {
-    gap: 11px;
-    padding: 13px 15px;
+    gap: 8px;
+    padding: 10px 12px;
   }
   .speed-cluster {
-    gap: 13px;
+    gap: 10px;
   }
   .pilot-button {
     padding: 10px;
-  }
-  #decision-status {
-    min-width: 145px;
   }
   #context-message {
     max-width: 160px;
@@ -913,68 +820,65 @@ dialog::backdrop {
 @media (max-width: 650px) {
   .topbar {
     left: 13px;
-    right: 13px;
     top: 13px;
-    gap: 9px;
-    flex-wrap: wrap;
+    max-width: calc(100% - 26px);
+    height: 44px;
+    padding: 7px 6px 7px 10px;
+    gap: 10px;
   }
   .brand {
-    font-size: 21px;
-    gap: 1px;
+    font-size: 16px;
+    gap: 7px;
   }
   .brand-mark {
-    width: 32px;
-    height: 32px;
-    border-radius: 8px;
-    margin-right: 4px;
-  }
-  .brand-mark svg {
-    width: 19px;
+    width: 22px;
+    height: 22px;
   }
   .world-picker {
-    height: 35px;
-    margin-left: auto;
-    margin-right: 0;
-    gap: 0;
-    padding: 3px 4px 3px 8px;
+    height: 26px;
+    gap: 3px;
+    padding-left: 10px;
   }
   .world-picker select {
-    font-size: 10px;
+    font-size: 11px;
     max-width: 112px;
   }
-  .world-picker > button {
+  .world-picker > button,
+  #github-link {
     width: 29px;
   }
-  .top-tools {
-    position: absolute;
-    right: 0;
-    top: 48px;
-    height: 35px;
-    gap: 0;
-    padding: 3px;
-    border-radius: 8px;
+  .dock-tools {
+    grid-column: 2;
+    justify-content: space-between;
   }
-  .top-tools button {
-    padding: 6px;
+  .pilot-actions {
+    justify-self: end;
   }
-  .top-tools button > span {
-    display: none;
+  .candidate-button {
+    min-height: 38px;
+    min-width: 38px;
   }
-  .top-tools svg {
+  .dock-tools button {
+    min-width: 36px;
+    padding: 8px;
+  }
+  .dock-tools svg {
     width: 15px;
     height: 15px;
   }
-  .top-tools .divider {
+  .dock-tools .divider {
     display: none;
   }
+  .navigation-hud {
+    right: 13px;
+    top: 69px;
+    max-width: calc(100% - 26px);
+  }
   .navigation-card {
-    left: 13px;
-    top: 61px;
     min-height: 49px;
     padding: 9px 10px;
     gap: 9px;
     border-radius: 8px;
-    max-width: calc(100% - 133px);
   }
   .navigation-card > span:first-child {
     width: 22px;
@@ -1001,21 +905,20 @@ dialog::backdrop {
     width: 13px;
   }
   .minimap {
-    left: 13px;
-    bottom: 124px;
     width: 148px;
   }
   .bottom-hud {
-    width: calc(100% - 20px);
+    max-width: calc(100% - 20px);
     bottom: 11px;
   }
   .driver-dock {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
     padding: 11px;
     gap: 9px;
-    height: 79px;
+    height: auto;
     border-radius: 13px;
     justify-content: space-between;
-    flex-wrap: nowrap;
   }
   .speed-cluster {
     gap: 7px;
@@ -1058,8 +961,8 @@ dialog::backdrop {
   }
   #decision-status {
     min-width: 0;
-    max-width: 89px;
-    margin-right: 0;
+    width: 100px;
+    max-width: 100%;
     gap: 3px;
   }
   #pilot-state {
@@ -1067,33 +970,15 @@ dialog::backdrop {
   }
   #context-message {
     font-size: 7px;
-    max-width: 89px;
+    max-width: 100px;
     line-height: 1.5;
-    white-space: normal;
   }
-  .driver-dock > button:not(.pilot-button) {
-    padding: 3px;
-  }
-  .driver-dock > button:not(.pilot-button) svg {
-    width: 15px;
-    height: 15px;
-  }
-  .footer-line {
-    padding: 8px 4px 0;
+  .cost-total {
     font-size: 8px;
-    gap: 8px;
-  }
-  #vector-caption {
-    display: none;
+    gap: 4px;
   }
   .cost-total strong {
-    font-size: 10px;
-  }
-  .controls-panel {
-    bottom: 123px;
-    right: 12px;
-    width: 266px;
-    padding: 16px;
+    font-size: 9px;
   }
   .vector-label {
     font-size: 8px;
@@ -1104,7 +989,7 @@ dialog::backdrop {
     padding: 4px 6px;
   }
   #toast {
-    bottom: 130px;
+    bottom: 186px;
     font-size: 10px;
   }
   #json-dialog {
@@ -1163,7 +1048,6 @@ dialog::backdrop {
 body.crashed .bottom-hud,
 body.crashed .navigation-card,
 body.crashed .minimap,
-body.crashed .top-tools,
 body.crashed .world-picker {
   visibility: hidden;
 }

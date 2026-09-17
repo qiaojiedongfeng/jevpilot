@@ -948,9 +948,26 @@ export class Simulation {
       ),
       c = this.crossingFor(v);
     const turn = c ? angle(c.exit - c.approach) : 0;
+    const nextTurn = c
+      ? Math.abs(turn) > 3
+        ? "uturn"
+        : Math.abs(turn) < 0.3
+          ? "straight"
+          : turn > 0
+            ? "right"
+            : "left"
+      : "arrive";
     const section = routeSection(v, near.s);
     const instructions = {
-      local: ["Take the Interstate 08 on-ramp", "left"],
+      local: [
+        c?.nodeId === "mill-interchange" && nextTurn === "left"
+          ? "Turn left onto the Interstate 08 entrance"
+          : ["left", "right"].includes(nextTurn)
+            ? `Turn ${nextTurn} through Millbrook`
+            : "Continue through Millbrook",
+        nextTurn,
+      ],
+      ramp_turn: ["Take the Interstate 08 North on-ramp", "left"],
       onramp: ["Join the acceleration lane", "merge"],
       merge: ["Merge onto Interstate 08", "merge"],
       interstate: ["Take the Cedar Town exit", "exit"],
@@ -967,15 +984,7 @@ export class Simulation {
         (angle(heading(v, look) - v.heading) * 180) / Math.PI,
       ),
       lookahead: { x: round(look.x), z: round(look.z) },
-      next_turn: c
-        ? Math.abs(turn) > 3
-          ? "uturn"
-          : Math.abs(turn) < 0.3
-            ? "straight"
-            : turn > 0
-              ? "right"
-              : "left"
-        : "arrive",
+      next_turn: nextTurn,
       turn_distance_m: round(
         c ? Math.max(0, c.stopS - v.s + 10) : v.route.length - v.s,
       ),
@@ -987,7 +996,14 @@ export class Simulation {
             road_name: section.name,
             speed_limit_mps: section.speedLimit,
             next_turn: instructions[section.kind][1],
-            turn_distance_m: round(Math.max(0, section.endS - near.s)),
+            turn_distance_m: round(
+              Math.max(
+                0,
+                c && ["local", "ramp_turn"].includes(section.kind)
+                  ? c.stopS - near.s + 10
+                  : section.endS - near.s,
+              ),
+            ),
           }
         : {}),
     };
