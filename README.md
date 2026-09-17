@@ -2,9 +2,15 @@
 
 https://github.com/user-attachments/assets/4baef58e-54ef-4d17-9982-353a0b6e6f45
 
+<p align="center">
+  <a href="https://jevpilot.standardagents.ai">
+    <img src="docs/try-jevpilot.svg" alt="Try JevPilot →" width="256" height="64" />
+  </a>
+</p>
+
 A demo project showing Tesla Autopilot-like behavior using [Jev by TypeSafe AI](https://typesafe.ai/).
 
-[Try JevPilot](https://jevpilot.standardagents.ai) — sign in with Standard Agents for $0.25 of free Jev play credit. Joining the early-access list is optional.
+Sign in with Standard Agents for $0.25 of free Jev play credit. Joining the early-access list is optional.
 
 The hosted `/api/decide` endpoint requires a valid login session. The browser sends its secure, HttpOnly session cookie; the Jev API key stays on the server.
 
