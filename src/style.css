@@ -699,6 +699,20 @@ input[type="range"]::-webkit-slider-thumb {
   box-shadow: 0 8px 30px #24272d3a;
   line-height: 1.5;
 }
+#toast.error {
+  background: #2b0c10f5;
+  color: #ff3b30;
+  border-color: #ff3b30;
+  font-weight: 650;
+  box-shadow: 0 8px 30px #ff3b3033;
+}
+#connection.error {
+  color: #ff2424;
+  font-weight: 650;
+}
+#connection.error .dot {
+  background: #ff2424;
+}
 dialog {
   padding: 0;
   border: 1px solid #f7f7f7;
@@ -1259,4 +1273,9 @@ body.crashed .world-picker {
   #crash-dialog {
     animation: none;
   }
+}
+
+#candidates-toggle[aria-pressed="true"] {
+  color: #007aff;
+  background: #007aff15;
 }

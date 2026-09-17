@@ -66,7 +66,9 @@ try {
   await page.screenshot({ path: "artifacts/desktop.png" });
   await page.locator("#scene-json").click();
   let input = JSON.parse(await page.locator("#json-content").innerText());
-  expect(input.vectors).toHaveProperty("C");
+  expect(Object.keys(input.vectors)).toHaveLength(12);
+  expect(input.road).toHaveProperty("drivable_polygons");
+  expect(input.recovery.active).toBe(false);
   expect(input.scene).toHaveProperty("nearby");
   expect(input).not.toHaveProperty("world");
   await page.getByRole("button", { name: "Perception", exact: true }).click();
@@ -116,6 +118,11 @@ try {
   await page.locator("#controls-toggle").click();
   await page.locator("#reset-car").click();
   await page.locator("#close-controls").click();
+  await page.locator("#candidates-toggle").click();
+  await expect(page.locator("#candidates-toggle")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
   await page.locator("#autopilot").click();
   await expect(page.locator(".vector-label.selected")).toBeVisible({
     timeout: 15000,
@@ -149,7 +156,7 @@ try {
     )
     .toBe(true);
   const plans = await readPlans();
-  expect(plans.meshCount).toBe(22);
+  expect(plans.meshCount).toBe(26);
   expect(plans.selected.length).toBe(1);
   expect(plans.selected[0].width).toBeGreaterThan(
     Math.max(...plans.alternatives) * 2,

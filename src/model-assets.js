@@ -3,13 +3,14 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { materials, physical } from "./materials.js";
+import { steeringCurvature } from "./planning.js";
 
 let carAsset;
 const WHEEL_NAMES = ["wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr"];
 
-export function updateHeroWheels(model, signedDistance, steering) {
+export function updateHeroWheels(model, signedDistance, steering, speed) {
   const wheelbase = model.userData.wheelbase;
-  const curvature = Math.tan(steering * 0.58) / 2.7;
+  const curvature = steeringCurvature(steering, speed);
   for (const name of WHEEL_NAMES) {
     const wheel = model.getObjectByName(name);
     const rotor = wheel.children[0];

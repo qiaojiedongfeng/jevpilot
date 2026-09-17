@@ -110,7 +110,11 @@ test("visibility excludes objects behind the car and building-occluded objects",
   );
   const copy = JSON.parse(JSON.stringify(o));
   assert(copy.world.roads.length);
-  assert(copy.steering_candidates.C);
+  assert(
+    Object.values(copy.steering_candidates).some((v) =>
+      Number.isFinite(v.steering),
+    ),
+  );
   assert.equal(copy.ego.position.y, 0.4);
 });
 

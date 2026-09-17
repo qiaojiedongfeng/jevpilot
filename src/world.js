@@ -1,4 +1,5 @@
 import { rng, choose, dist, heading, move, samplePolyline } from "./math.js";
+import { generateHighway, makeHighwayRoute } from "./highway.js";
 export const THEMES = {
   city: {
     name: "Skyline City",
@@ -18,7 +19,7 @@ export const THEMES = {
   },
   highway: {
     name: "Interstate 08",
-    subtitle: "Open lanes. Open throttle.",
+    subtitle: "On-ramp, open road, small-town arrival.",
     size: 8,
     traffic: 18,
     buildings: 0,
@@ -27,7 +28,7 @@ export const THEMES = {
   },
 };
 export function generateWorld(seed, type = "town") {
-  if (type === "highway") return generateHighway(seed);
+  if (type === "highway") return generateHighway(seed, THEMES.highway);
   const r = rng(seed),
     theme = THEMES[type],
     n = theme.size,
@@ -365,146 +366,4 @@ export function signalState(node, time, approach) {
     walk: false,
     remaining: phase < 10 ? 10 - phase : phase < 18 ? 18 - phase : 20 - phase,
   };
-}
-
-function smoothRoad(nodes) {
-  const raw = [];
-  for (let i = 0; i < nodes.length - 1; i++) {
-    const p0 = nodes[Math.max(0, i - 1)],
-      p1 = nodes[i],
-      p2 = nodes[i + 1],
-      p3 = nodes[Math.min(nodes.length - 1, i + 2)];
-    for (let k = 0; k < 40; k++) {
-      const t = k / 40,
-        t2 = t * t,
-        t3 = t2 * t,
-        p = {};
-      for (const axis of ["x", "z"])
-        p[axis] =
-          0.5 *
-          (2 * p1[axis] +
-            (-p0[axis] + p2[axis]) * t +
-            (2 * p0[axis] - 5 * p1[axis] + 4 * p2[axis] - p3[axis]) * t2 +
-            (-p0[axis] + 3 * p1[axis] - 3 * p2[axis] + p3[axis]) * t3);
-      raw.push(p);
-    }
-  }
-  raw.push({ ...nodes.at(-1) });
-  return samplePolyline(raw, 2);
-}
-function makeHighwayRoute(world, ids, laneOffset = world.theme.laneOffset) {
-  const center = smoothRoad(ids.map((id) => world.byId[id]));
-  const lane = center.map((p, i) =>
-    move(
-      p,
-      heading(
-        center[Math.max(0, i - 1)],
-        center[Math.min(center.length - 1, i + 1)],
-      ) +
-        Math.PI / 2,
-      laneOffset,
-    ),
-  );
-  const points = samplePolyline(lane.slice(7, -8), 1.5);
-  return { ids, points, crossings: [], length: points.at(-1).s };
-}
-function generateHighway(seed) {
-  const r = rng(seed),
-    nodes = [],
-    edges = [],
-    objects = [];
-  const phase = r() * 2;
-  for (let i = 0; i < 9; i++)
-    nodes.push({
-      id: `h${i}`,
-      x: Math.sin(i * 0.65 + phase) * 48,
-      z: 680 - i * 170,
-      control: "none",
-      offset: 0,
-      neighbors: [],
-    });
-  for (let i = 0; i < nodes.length - 1; i++) {
-    const a = nodes[i],
-      b = nodes[i + 1];
-    a.neighbors.push(b.id);
-    b.neighbors.push(a.id);
-    edges.push({
-      id: `interstate-${i}`,
-      a: a.id,
-      b: b.id,
-      width: 25,
-      length: dist(a, b),
-      speedLimit: 28,
-      name: "Interstate 08",
-    });
-  }
-  const byId = Object.fromEntries(nodes.map((n) => [n.id, n]));
-  for (let i = 0; i < 240; i++) {
-    const z = -740 + r() * 1480,
-      x = (r() > 0.5 ? 1 : -1) * (45 + r() * 180);
-    objects.push({
-      id: `tree-${i}`,
-      type: "tree",
-      x,
-      z,
-      height: 5 + r() * 9,
-      kind: r() > 0.25 ? "pine" : "round",
-    });
-  }
-  for (let i = 0; i < 12; i++)
-    objects.push({
-      id: `hill-${i}`,
-      type: "hill",
-      x: (i % 2 ? 1 : -1) * (170 + r() * 110),
-      z: -700 + r() * 1400,
-      height: 20 + r() * 35,
-      width: 70 + r() * 60,
-      depth: 80,
-    });
-  for (const i of [2, 5, 7])
-    objects.push({
-      id: `overpass-${i}`,
-      type: "overpass",
-      x: nodes[i].x,
-      z: nodes[i].z - 45,
-      width: 230,
-      depth: 13,
-      height: 9,
-    });
-  for (const i of [1, 4, 6])
-    objects.push({
-      id: `highway-sign-${i}`,
-      type: "highway_sign",
-      x: nodes[i].x,
-      z: nodes[i].z - 65,
-      width: 18,
-      height: 8,
-      text: "INTERSTATE 08",
-    });
-  const world = {
-    seed,
-    type: "highway",
-    theme: THEMES.highway,
-    nodes,
-    byId,
-    edges,
-    objects,
-    xs: [-330, 330],
-    zs: [-760, 760],
-    bounds: { minX: -350, maxX: 350, minZ: -770, maxZ: 770 },
-    startNode: "h1",
-    nextNode: "h2",
-    destination: "h7",
-    roadSamples: smoothRoad(nodes),
-  };
-  world.route = makeHighwayRoute(world, [
-    "h1",
-    "h2",
-    "h3",
-    "h4",
-    "h5",
-    "h6",
-    "h7",
-  ]);
-  return world;
 }

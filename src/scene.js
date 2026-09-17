@@ -400,12 +400,35 @@ export class DriveScene {
         const sign = new THREE.Mesh(
           new THREE.PlaneGeometry(10, 2.3),
           new THREE.MeshBasicMaterial({
-            map: label("INTERSTATE 08", "#3a755d", "#eef7e3", 512, 128),
+            map: label(
+              o.text || "INTERSTATE 08",
+              "#3a755d",
+              "#eef7e3",
+              512,
+              128,
+            ),
             side: THREE.FrontSide,
           }),
         );
         sign.position.set(o.x + 6, 7, o.z);
         s.add(sign);
+        continue;
+      }
+      if (o.type === "town_sign") {
+        cyl(s, 0.08, 3, o.x, 1.5, o.z, "#8e9f95");
+        const sign = new THREE.Mesh(
+          new THREE.PlaneGeometry(5, 1.4),
+          new THREE.MeshBasicMaterial({
+            map: label(o.text, "#3a755d", "#eef7e3", 512, 128),
+          }),
+        );
+        sign.position.set(o.x, 2.7, o.z);
+        s.add(sign);
+        continue;
+      }
+      if (o.type === "streetlight") {
+        cyl(s, 0.075, o.height, o.x, o.height / 2, o.z, "#596b61");
+        box(s, 1.3, 0.12, 0.6, o.x - 0.5, o.height, o.z, "#e4e5d7");
         continue;
       }
       if (o.type === "parcel") {
@@ -738,22 +761,22 @@ export class DriveScene {
   }
   buildHighway(group, world) {
     const pts = world.roadSamples;
-    const strip = (offset, width, color, y) => {
+    const strip = (offset, width, color, y, path = pts, skip = null) => {
       const positions = [],
         indices = [];
-      for (let i = 0; i < pts.length; i++) {
-        const a = pts[Math.max(0, i - 1)],
-          b = pts[Math.min(pts.length - 1, i + 1)],
+      for (let i = 0; i < path.length; i++) {
+        const a = path[Math.max(0, i - 1)],
+          b = path[Math.min(path.length - 1, i + 1)],
           dx = b.x - a.x,
           dz = b.z - a.z,
           len = Math.hypot(dx, dz) || 1;
         for (const side of [-1, 1])
           positions.push(
-            pts[i].x - (dz / len) * (offset + (side * width) / 2),
+            path[i].x - (dz / len) * (offset + (side * width) / 2),
             y,
-            pts[i].z + (dx / len) * (offset + (side * width) / 2),
+            path[i].z + (dx / len) * (offset + (side * width) / 2),
           );
-        if (i < pts.length - 1) {
+        if (i < path.length - 1 && !skip?.(path[i])) {
           const k = i * 2;
           indices.push(k, k + 1, k + 2, k + 1, k + 3, k + 2);
         }
@@ -772,7 +795,20 @@ export class DriveScene {
     strip(0, 30, "#bbc5b4", 0.01);
     strip(0, 25, "#70817c", 0.045);
     strip(0, 2.1, "#a8b89c", 0.09);
-    for (const offset of [-11.7, 11.7]) strip(offset, 0.14, "#e5e9d8", 0.08);
+    for (const offset of [-11.7, 11.7])
+      strip(
+        offset,
+        0.14,
+        "#e5e9d8",
+        0.08,
+        pts,
+        offset > 0
+          ? (p) =>
+              world.shoulderOpenings?.some(
+                ([start, end]) => p.s >= start && p.s <= end,
+              )
+          : null,
+      );
     for (let i = 0; i < pts.length - 1; i += 4) {
       const p = pts[i],
         q = pts[i + 1],
@@ -795,6 +831,48 @@ export class DriveScene {
         box(group, 0.18, 0.75, 1, p.x, 0.45, p.z, "#bac5b7", -h);
     }
     strip(0, 0.25, "#bac5b7", 0.8);
+    for (const road of world.connectorRoads || []) {
+      const path = road.points;
+      if (road.twoWay) strip(0, road.width + 3.6, "#d8d6c9", 0.012, path);
+      strip(0, road.width, "#70817c", 0.05, path);
+      for (const side of [-1, 1]) {
+        // Paint a broken boundary where an acceleration/deceleration lane
+        // overlaps the carriageway, rather than a solid line across the merge.
+        strip(
+          side * (road.width / 2 - 0.3),
+          0.12,
+          "#e5e9d8",
+          0.085,
+          path,
+          ["merge", "exit"].includes(road.kind)
+            ? (p) => Math.floor(p.s / 4) % 2 === 1
+            : null,
+        );
+      }
+      if (road.twoWay)
+        strip(
+          0,
+          0.13,
+          "#d5d7b4",
+          0.087,
+          path,
+          (p) => Math.floor(p.s / 4) % 2 === 1,
+        );
+    }
+    if (world.destinationStopLine) {
+      const line = world.destinationStopLine;
+      box(
+        group,
+        4.8,
+        0.025,
+        0.25,
+        line.x,
+        0.088,
+        line.z,
+        "#ecebd9",
+        -line.heading,
+      );
+    }
   }
   render(dt) {
     const { width, height } = this.canvas.getBoundingClientRect();
@@ -820,7 +898,8 @@ export class DriveScene {
         this.heroCar,
         Math.max(0, this.sim.distance - this.wheelDistance) *
           this.wheelDirection,
-        v.steering,
+        v.wheelSteering ?? v.steering,
+        v.speed,
       );
     this.wheelDistance = this.sim.distance;
     const insideCar = this.mode === "hood" && !this.sim.crash;

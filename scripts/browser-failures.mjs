@@ -1,4 +1,5 @@
 import { chromium, expect } from "@playwright/test";
+import { candidateChoices } from "../src/planning.js";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 const cached =
@@ -35,6 +36,10 @@ let release;
 let observed;
 const pending = new Promise((r) => (observed = r));
 await page.route("**/api/decide", async (route) => {
+  const { state } = route.request().postDataJSON();
+  const ids = Object.keys(candidateChoices(state));
+  const choice = ids[0],
+    selected = state.vectors[choice];
   observed();
   await new Promise((r) => (release = r));
   await route.fulfill({
@@ -44,25 +49,18 @@ await page.route("**/api/decide", async (route) => {
       model: "test-double",
       answers: {
         vector: {
-          choice: "R4",
+          choice,
           confidence: 1,
-          probabilities: {
-            L4: 0,
-            L3: 0,
-            L2: 0,
-            L1: 0,
-            L0: 0,
-            C: 0,
-            R0: 0,
-            R1: 0,
-            R2: 0,
-            R3: 0,
-            R4: 1,
-          },
+          probabilities: Object.fromEntries(
+            ids.map((id) => [id, id === choice ? 1 : 0]),
+          ),
         },
-        velocity: { choice: "fast", confidence: 1 },
       },
-      controls: { steering: 0.85, velocity: 10 },
+      batch_id: state.batch_id,
+      controls: {
+        steering: selected.steering,
+        velocity: selected.velocity_mps,
+      },
       usage: { input_tokens: 10, output_tokens: 2 },
       latency_ms: 150,
       cost_usd: 0.00000042,

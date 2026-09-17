@@ -21,7 +21,9 @@ let calls = 0,
 for (; calls < 100; calls++) {
   node.offset = (northSouth ? 12 : 2) - sim.time;
   sim.scanScene();
-  const answer = await evaluate(sim.decisionState(), process.env);
+  const state = sim.decisionState();
+  const answer = await evaluate(state, process.env);
+  v.maneuver = state.vectors[answer.answers.vector.choice];
   cost += answer.cost_usd;
   v.steering = answer.controls.steering;
   v.target = answer.controls.velocity;

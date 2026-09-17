@@ -18,20 +18,37 @@ import {
   blockedByBuilding,
 } from "./math.js";
 import {
-  VECTOR_AXES,
-  VELOCITY,
-  projectVectors,
   physics,
   pedalPhysics,
+  candidateChoices,
+  maneuverSteering,
+  maneuverVelocity,
+  uTurnApproach,
+  routeSection,
+  routeSpeedLimit,
+  BRAKING,
+  stopLineDistance,
+  stopAvailability,
 } from "./planning.js";
 import {
-  brakingSpeed,
+  followingSpeed,
   leadVehicle,
+  followingGap,
   predictTrafficConflict,
+  relativeTrafficState,
+  rearTrafficPressure,
 } from "./traffic-safety.js";
 import { collisionPose, firstCollision } from "./collisions.js";
-export { VELOCITY, physics } from "./planning.js";
-export const STEERING = VECTOR_AXES;
+export { physics } from "./planning.js";
+import { createDrivingPlan, recoveryBlocked } from "./driving-plan.js";
+import { updateCourtesy } from "./courtesy.js";
+import { routeFromLocation, routesFromLocation } from "./routing.js";
+
+const REROUTE_DISTANCE_M = 30;
+const REROUTE_DELAY_S = 6;
+const REROUTE_COOLDOWN_S = 30;
+const PLAYER_STOP_DWELL_S = 0.6;
+
 export class Simulation {
   constructor(seed = Math.floor(Math.random() * 999999), type = "town") {
     this.reset(seed, type);
@@ -53,7 +70,23 @@ export class Simulation {
     this.freeExplore = false;
     this.events = [];
     this.locks = new Map();
+    this.courtesy = new Map();
+    this.nextCourtesy = 0;
     this.r = rng(seed + 51);
+    this.planRandom = rng(seed + 9173);
+    this.planSequence = 0;
+    this.routeVersion = 0;
+    this.routeChoices = {};
+    this.nextRouteChoices = 0;
+    this.routeChoicesOrigin = null;
+    this.routeHoldUntil = 0;
+    this.nextRouteCheck = 0;
+    this.offRouteSince = null;
+    this.lastReroute = -Infinity;
+    this.destinationApproach = this.world.route.ids.slice(-2);
+    this.destinationPoint = { ...this.world.route.points.at(-1) };
+    this.lastPlan = null;
+    this.lastDecisionState = null;
     this.contacts = new Set();
     this.discovered = new Map();
     this.perception = [];
@@ -73,6 +106,7 @@ export class Simulation {
       route: this.world.route,
       s: 0,
       stops: {},
+      intersectionMemory: null,
       width: 1.9,
       depth: 4.75,
     };
@@ -122,13 +156,18 @@ export class Simulation {
     }
   }
   spawnTraffic(i, distant = false) {
-    const nodes = this.world.nodes;
+    const highway = this.world.type === "highway";
+    const nodes = highway
+      ? this.world.nodes.filter((node) => /^h\d+$/.test(node.id))
+      : this.world.nodes;
     let a = choose(this.r, nodes),
       b = choose(
         this.r,
         nodes.filter((n) => dist(n, a) > 100),
       ),
-      ids = shortestPath(this.world, a.id, b.id);
+      ids = highway
+        ? (i % 4 < 2 ? nodes : [...nodes].reverse()).map((node) => node.id)
+        : shortestPath(this.world, a.id, b.id);
     if (ids.length < 3) return this.spawnTraffic(i, distant);
     const route = makeRoute(
         this.world,
@@ -193,6 +232,82 @@ export class Simulation {
   crossingFor(v) {
     return v.route.crossings.find((c) => c.stopS - v.s > -19);
   }
+  rememberIntersectionStop(v, crossing, signal) {
+    const key = `${this.routeVersion}:${crossing.nodeId}:${crossing.stopS}:${crossing.approach}`;
+    if (v.intersectionMemory?.key !== key) {
+      v.intersectionMemory = {
+        key,
+        nodeId: crossing.nodeId,
+        stopCount: 0,
+        stationarySince: null,
+        currentStopRecorded: false,
+        lastStop: null,
+      };
+      // A completed visit to the same junction is not this approach's stop.
+      if (v.stops[crossing.nodeId]?.passed) delete v.stops[crossing.nodeId];
+    }
+    const memory = v.intersectionMemory;
+    const line = {
+      ...pointAt(v.route.points, crossing.stopS),
+      heading: crossing.approach,
+    };
+    const lineDistance = stopLineDistance(v, line);
+    const approaching =
+      crossing.stopS - v.s > -0.7 &&
+      lineDistance <= 80 &&
+      dist(v, pointAt(v.route.points, v.s)) < 6 &&
+      Math.abs(angle(v.heading - crossing.approach)) < 1.2;
+    if (!approaching || Math.abs(v.speed) >= 0.2) {
+      memory.stationarySince = null;
+      memory.currentStopRecorded = false;
+      return;
+    }
+    memory.stationarySince ??= this.time;
+    const duration = this.time - memory.stationarySince;
+    if (duration < PLAYER_STOP_DWELL_S) return;
+    if (!memory.currentStopRecorded) {
+      memory.stopCount++;
+      memory.currentStopRecorded = true;
+      memory.lastStop = {
+        position: { x: v.x, z: v.z },
+        progress: v.s,
+        lineDistance,
+        signal,
+      };
+    }
+    memory.lastStop.confirmedAt = this.time;
+    memory.lastStop.duration = duration;
+  }
+  intersectionStopMemory(control) {
+    const memory = this.player.intersectionMemory;
+    if (
+      !control ||
+      memory?.key !==
+        `${this.routeVersion}:${control.nodeId}:${control.stopS}:${control.approach}`
+    )
+      return null;
+    const stop = memory.lastStop;
+    const age = stop ? this.time - stop.confirmedAt : null;
+    return {
+      approach_id: memory.key,
+      stops_on_this_approach: memory.stopCount,
+      stopped_recently: age !== null && age <= 30,
+      currently_stopped: memory.stationarySince !== null,
+      current_stop_duration_s:
+        memory.stationarySince === null
+          ? 0
+          : round(this.time - memory.stationarySince, 1),
+      last_stop: stop
+        ? {
+            age_s: round(age, 1),
+            duration_s: round(stop.duration, 1),
+            stop_line_ahead_m: round(stop.lineDistance, 1),
+            signal_at_stop: stop.signal,
+            forward_progress_since_m: round(this.player.s - stop.progress, 1),
+          }
+        : null,
+    };
+  }
   rule(v, update = false) {
     const c = this.crossingFor(v);
     if (!c)
@@ -220,12 +335,19 @@ export class Simulation {
         ? v.amber.proceed
         : (v.speed * v.speed) / 16 > Math.max(0, delta - v.depth / 2 - 0.2);
     const inside = delta < -0.7;
+    if (update && v === this.player)
+      this.rememberIntersectionStop(v, c, signal.color);
     let stop = v.stops[c.nodeId];
-    if (update && delta < 5.5 && delta > -0.7 && v.speed < 0.2) {
+    if (update && delta < 5.5 && delta > -0.7 && Math.abs(v.speed) < 0.2) {
       if (!stop)
         v.stops[c.nodeId] = stop = { arrived: this.time, served: false };
-      if (this.time - stop.arrived >= 1.2) stop.served = true;
-    }
+      stop.stationarySince ??= this.time;
+      if (
+        this.time - stop.stationarySince >=
+        (v === this.player ? PLAYER_STOP_DWELL_S : 1.2)
+      )
+        stop.served = true;
+    } else if (update && stop) stop.stationarySince = null;
     let reason = "Clear road",
       mustStop = false;
     if (!inside) {
@@ -243,12 +365,17 @@ export class Simulation {
         mustStop = true;
         reason = "Stop sign";
       }
+      const grant = this.courtesy.get(node.id);
+      const released = grant?.id === v.id;
       const lock = this.locks.get(node.id);
-      if (lock && lock.id !== v.id) {
+      // At traffic lights Jev evaluates the visible traffic and candidate paths.
+      // The NPC reservation must not turn a green light into a blanket stop.
+      const reservationRequired = node.control === "stop" || v !== this.player;
+      if (reservationRequired && !released && lock && lock.id !== v.id) {
         mustStop = true;
         reason = "Yield to crossing traffic";
       }
-      if (node.control === "stop" && stop?.served) {
+      if (node.control === "stop" && stop?.served && !released) {
         const waiting = [this.player, ...this.traffic].filter(
           (o) =>
             o.id !== v.id &&
@@ -262,10 +389,16 @@ export class Simulation {
           reason = "Yield to first arrival";
         }
       }
+      if (grant && !released) {
+        mustStop = true;
+        reason = "Letting stopped traffic clear";
+      }
       const pedestrians = this.pedestrians.filter(
         (p) => p.crossing && p.walking && p.nodeId === node.id,
       );
-      if (pedestrians.length) {
+      // The player's selected trajectory handles pedestrian conflicts. Someone
+      // crossing another arm of the junction must not stop the entire junction.
+      if (v !== this.player && pedestrians.length) {
         mustStop = true;
         reason = "Yield to pedestrian";
       }
@@ -292,9 +425,11 @@ export class Simulation {
     const rule = this.rule(v),
       lead = leadVehicle(v, [...this.traffic, this.player]),
       gap = lead?.gap ?? Infinity;
-    let max = this.world.theme.limit,
+    let max = Math.min(this.world.theme.limit, routeSpeedLimit(v, v.s)),
       reason = null;
-    if (rule.mustStop && rule.distance > -0.7) {
+    // NPCs obey the scripted traffic rules. Jev gets the observations and
+    // decides when the player's car should approach, yield, or stop.
+    if (v !== this.player && rule.mustStop && rule.distance > -0.7) {
       const cap = Math.sqrt(
         2 * 5 * Math.max(0, rule.distance - v.depth / 2 - 0.2),
       );
@@ -311,7 +446,7 @@ export class Simulation {
         reason = "Destination ahead";
       }
     }
-    const cap = brakingSpeed(gap - (lead?.other.type === "motorcycle" ? 4 : 3));
+    const cap = followingSpeed(v, lead);
     if (cap < max) {
       max = cap;
       reason =
@@ -319,15 +454,24 @@ export class Simulation {
           ? "Motorcycle ahead"
           : "Vehicle ahead";
     }
+    // A hazard on the currently selected path must not zero out the speeds of
+    // every new candidate. Each candidate predicts its own collisions, while
+    // the real-time guard still checks whichever maneuver Jev actually selects.
+    const planningMax = max;
     const conflict =
       v === this.player
         ? predictTrafficConflict(v, [...this.traffic, ...this.pedestrians])
         : null;
-    if (conflict && conflict.max_speed_mps < max) {
+    if (conflict?.braking_reduces_risk && conflict.max_speed_mps < max) {
       max = conflict.max_speed_mps;
       reason = conflict.reason;
     }
-    return { max, reason, rule, gap, conflict, lead };
+    const released = this.courtesy.get(rule.nodeId)?.id === v.id;
+    if (v !== this.player && released && !rule.mustStop && !this.complete) {
+      max = Math.min(max, 1.5);
+      if (max > 0) reason = "Taking a clear gap";
+    }
+    return { max, planningMax, reason, rule, gap, conflict, lead, released };
   }
   step(dt) {
     if (this.paused || this.crash) return;
@@ -343,6 +487,7 @@ export class Simulation {
     const firstStep = this.time === 0;
     dt = Math.min(dt, 0.05);
     this.time += dt;
+    this.rerouteIfNeeded();
     for (const [id, lock] of this.locks) {
       const car = [this.player, ...this.traffic].find((c) => c.id === lock.id),
         node = this.world.byId[id];
@@ -387,13 +532,15 @@ export class Simulation {
         p.heading = angle(p.walkPath.heading + (p.direction < 0 ? Math.PI : 0));
       }
     }
+    updateCourtesy(this);
     for (const v of this.traffic) {
       if (v.route.length - v.s < 75) this.continueTraffic(v);
       const rule = this.rule(v, true);
       let target = this.speedEnvelope(v).max;
       const next = pointAt(v.route.points, v.s + 9),
         h = heading(v, next);
-      if (Math.abs(angle(h - v.heading)) > 0.2) target = Math.min(target, 4);
+      if (v.s < v.route.length - 1 && Math.abs(angle(h - v.heading)) > 0.2)
+        target = Math.min(target, 6.5);
       v.speed += clamp(target - v.speed, -7 * dt, 2.8 * dt);
       if (
         rule.mustStop &&
@@ -425,19 +572,48 @@ export class Simulation {
     }
     const v = this.player,
       old = { ...collisionPose(v), s: v.s };
-    this.rule(v, true);
-    let target = v.target;
+    const currentRule = this.rule(v, true);
+    if (
+      v.maneuver?.stop_at_line?.node_id === currentRule.nodeId &&
+      (currentRule.color === "green" || currentRule.stopCompleted)
+    ) {
+      // A selected line-stop profile ceases to apply after a green light or
+      // served stop. Keep Jev's chosen speed cap until its next decision.
+      v.maneuver = { ...v.maneuver, stop_at_line: null };
+    }
+    let target = this.autopilot
+      ? maneuverVelocity(v, v.maneuver, v.target)
+      : v.target;
     this.brakeReason = null;
     if (this.autopilot && this.safety) {
-      const env = this.speedEnvelope(v);
-      if (target > env.max) {
-        target = env.max;
-        this.brakeReason = env.reason;
+      if (this.lastPlan?.recovery.active) {
+        target = clamp(target, -2, 2);
+        if (
+          recoveryBlocked(v, v.steering, target, [
+            ...this.world.objects.filter((o) => o.type === "building"),
+            ...this.traffic,
+            ...this.pedestrians,
+          ])
+        ) {
+          target = 0;
+          this.brakeReason = "Recovery clearance";
+        }
+      } else {
+        const env = this.speedEnvelope(v);
+        if (target > env.max) {
+          target = env.max;
+          this.brakeReason = env.reason;
+        }
       }
     }
     if (this.complete) target = 0;
-    if (this.autopilot || this.complete) physics(v, v.steering, target, dt);
-    else
+    v.appliedTarget = target;
+    if (this.autopilot || this.complete) {
+      const steering = v.maneuver
+        ? maneuverSteering(v, v.maneuver)
+        : v.steering;
+      physics(v, steering, target, dt);
+    } else
       pedalPhysics(
         v,
         this.steeringInput,
@@ -498,6 +674,12 @@ export class Simulation {
     this.distance += dist(old, v);
     const near = nearestOnPath(v, v.route.points);
     v.s = near.s;
+    // Reset immediately on rejoining, including while a worker is calculating.
+    if (near.distance <= REROUTE_DISTANCE_M && this.offRouteSince != null) {
+      this.offRouteSince = null;
+      this.routeChoices = {};
+      this.routeChoicesOrigin = null;
+    }
     for (const c of v.route.crossings) {
       if (old.s < c.stopS && v.s >= c.stopS && near.distance < 4) {
         const node = this.world.byId[c.nodeId];
@@ -526,6 +708,237 @@ export class Simulation {
       this.event("Destination reached. Nicely driven.", "success");
     }
   }
+  rerouteIfNeeded() {
+    if (
+      this.complete ||
+      this.freeExplore ||
+      this.crash ||
+      this.time < this.nextRouteCheck
+    )
+      return;
+    this.nextRouteCheck = this.time + 0.75;
+    const v = this.player,
+      near = nearestOnPath(v, v.route.points);
+    // Keep the route through turns, queues, and recovery on the same street.
+    // Heading and time spent stopped never override this proximity check.
+    if (near.distance <= REROUTE_DISTANCE_M) {
+      this.offRouteSince = null;
+      this.routeChoices = {};
+      this.routeChoicesOrigin = null;
+      return;
+    }
+    this.offRouteSince ??= this.time;
+    if (!this.routeChoiceNeeded()) return;
+    if (this.requestReroute) {
+      this.nextRouteCheck = this.time + 4;
+      this.requestReroute();
+      return;
+    }
+    const next = routeFromLocation(
+      this.world,
+      v,
+      this.destinationApproach,
+      this.destinationPoint,
+    );
+    if (!next) return;
+    // A car on the shoulder of the correct street should recover to that street,
+    // without continuously replacing the same route while it does so.
+    if (next.route.ids.join(",") === v.route.ids.join(",")) return;
+    this.installRoute(next);
+  }
+  installRoute(next) {
+    // A background calculation or Jev response may arrive after we rejoin.
+    if (!this.routeChoiceNeeded()) return false;
+    const v = this.player;
+    const previousControl = this.crossingFor(v);
+    const served = previousControl && v.stops[previousControl.nodeId];
+    v.route = this.world.route = next.route;
+    v.s = next.progress;
+    v.stops = {};
+    const newControl = this.crossingFor(v);
+    if (
+      served &&
+      newControl?.nodeId === previousControl.nodeId &&
+      Math.abs(angle(newControl.approach - previousControl.approach)) < 0.1
+    )
+      v.stops[newControl.nodeId] = served;
+    v.amber = null;
+    v.maneuver = null;
+    v.target = 0;
+    for (const [id, lock] of this.locks)
+      if (lock.id === v.id) this.locks.delete(id);
+    for (const [id, grant] of this.courtesy)
+      if (grant.id === v.id) this.courtesy.delete(id);
+    this.lastPlan = this.lastDecisionState = null;
+    this.lastReroute = this.time;
+    this.offRouteSince = null;
+    this.routeVersion++;
+    this.routeChoices = {};
+    this.nextRouteChoices = this.time;
+    this.routeHoldUntil = 0;
+    this.event("Route recalculated from your current location");
+    return true;
+  }
+  routeChoiceNeeded() {
+    return (
+      !this.complete &&
+      !this.freeExplore &&
+      !this.crash &&
+      this.offRouteSince != null &&
+      this.time - this.offRouteSince >= REROUTE_DELAY_S &&
+      this.time - this.lastReroute >= REROUTE_COOLDOWN_S &&
+      this.time >= this.routeHoldUntil &&
+      nearestOnPath(this.player, this.player.route.points).distance >
+        REROUTE_DISTANCE_M
+    );
+  }
+  refreshRouteChoices() {
+    if (!this.routeChoiceNeeded() || this.time < this.routeHoldUntil) {
+      this.routeChoices = {};
+      return;
+    }
+    const control = this.crossingFor(this.player);
+    // Commit through a turn instead of changing destinations halfway across it.
+    if (
+      control &&
+      Math.abs(control.stopS - this.player.s) < 18 &&
+      this.player.speed > 2
+    ) {
+      this.routeChoices = {};
+      return;
+    }
+    if (
+      this.time < this.nextRouteChoices &&
+      this.routeChoicesOrigin &&
+      dist(this.player, this.routeChoicesOrigin) < 10
+    )
+      return;
+    this.nextRouteChoices = this.time + 4;
+    this.routeChoicesOrigin = { x: this.player.x, z: this.player.z };
+    const candidates = routesFromLocation(
+      this.world,
+      this.player,
+      this.destinationApproach,
+      this.destinationPoint,
+    );
+    const current = this.player.route.ids.join(",");
+    const nearest = candidates[0];
+    this.routeChoices = {};
+    if (!nearest) return;
+    const selected = candidates.filter(
+      (c) =>
+        !current.endsWith(c.route.ids.join(",")) &&
+        c.distance < nearest.distance + 5,
+    );
+    for (const choice of selected) {
+      // Retain genuinely different first streets/turns rather than duplicate paths.
+      const key = choice.route.ids.slice(0, 3).join("_");
+      if (this.routeChoices[key]) continue;
+      this.routeChoices[key] = choice;
+      if (Object.keys(this.routeChoices).length === 3) break;
+    }
+  }
+  chooseRoute(id) {
+    if (!this.routeChoiceNeeded()) return false;
+    const next = this.routeChoices[id];
+    if (
+      !next ||
+      !this.routeChoicesOrigin ||
+      dist(this.player, this.routeChoicesOrigin) > 12
+    )
+      return false;
+    const control = this.crossingFor(this.player);
+    if (
+      control &&
+      Math.abs(control.stopS - this.player.s) < 18 &&
+      this.player.speed > 2
+    )
+      return false;
+    const entry = next.route.points.filter((p) => p.s <= next.progress + 60);
+    const progress = nearestOnPath(
+      this.player,
+      entry.length > 1 ? entry : next.route.points,
+    ).s;
+    if (!this.installRoute({ ...next, progress })) return false;
+    this.routeChoices = {};
+    this.nextRouteChoices = this.time + 20;
+    this.routeHoldUntil = this.time + 20;
+    return true;
+  }
+  globalNavigation() {
+    this.refreshRouteChoices();
+    const v = this.player;
+    const describe = (route, remaining, distance, relativeHeading = 0) => ({
+      via: route.ids,
+      remaining_m: round(remaining, 1),
+      join_distance_m: round(distance, 1),
+      heading_change_deg: round((relativeHeading * 180) / Math.PI, 1),
+    });
+    return {
+      coordinates: "World meters: x east, z south; heading 0 north, 90 east",
+      position: {
+        x: round(v.x, 1),
+        z: round(v.z, 1),
+        heading_deg: round((v.heading * 180) / Math.PI, 1),
+      },
+      destination: {
+        node: this.world.destination,
+        x: this.destinationPoint.x,
+        z: this.destinationPoint.z,
+      },
+      junctions: this.world.nodes.map((n) => ({
+        id: n.id,
+        x: n.x,
+        z: n.z,
+        control: n.control,
+      })),
+      roads: this.world.edges.map((e) => [
+        e.a,
+        e.b,
+        e.width,
+        !!e.oneWay,
+        e.speedLimit,
+        e.kind ?? "street",
+      ]),
+      road_fields: [
+        "from",
+        "to",
+        "width_m",
+        "one_way",
+        "speed_limit_mps",
+        "kind",
+      ],
+      stopped_traffic: this.world.nodes.flatMap((n) => {
+        const waiting = this.traffic.filter(
+          (o) =>
+            o.waitingSince != null &&
+            this.time - o.waitingSince > 6 &&
+            dist(o, n) < 24,
+        );
+        return waiting.length
+          ? [{ junction: n.id, vehicles: waiting.length }]
+          : [];
+      }),
+      routes: {
+        keep: describe(
+          v.route,
+          v.route.length - v.s,
+          nearestOnPath(v, v.route.points).distance,
+        ),
+        ...Object.fromEntries(
+          Object.entries(this.routeChoices).map(([id, c]) => [
+            id,
+            describe(
+              c.route,
+              c.route.length - c.progress,
+              c.distance,
+              c.relativeHeading,
+            ),
+          ]),
+        ),
+      },
+    };
+  }
   navigation() {
     const v = this.player,
       near = nearestOnPath(v, v.route.points),
@@ -535,49 +948,61 @@ export class Simulation {
       ),
       c = this.crossingFor(v);
     const turn = c ? angle(c.exit - c.approach) : 0;
+    const section = routeSection(v, near.s);
+    const instructions = {
+      local: ["Take the Interstate 08 on-ramp", "left"],
+      onramp: ["Join the acceleration lane", "merge"],
+      merge: ["Merge onto Interstate 08", "merge"],
+      interstate: ["Take the Cedar Town exit", "exit"],
+      exit: ["Follow the Cedar Town off-ramp", "exit"],
+      offramp: ["Enter Cedar Town", "straight"],
+      town: ["Stop at the town destination", "arrive"],
+    };
     return {
       remaining_m: round(Math.max(0, v.route.length - v.s)),
+      route_version: this.routeVersion,
+      rerouted: this.time - this.lastReroute < 3,
       route_offset_m: round(near.distance),
       heading_error_deg: round(
         (angle(heading(v, look) - v.heading) * 180) / Math.PI,
       ),
       lookahead: { x: round(look.x), z: round(look.z) },
       next_turn: c
-        ? Math.abs(turn) < 0.3
-          ? "straight"
-          : turn > 0
-            ? "right"
-            : "left"
+        ? Math.abs(turn) > 3
+          ? "uturn"
+          : Math.abs(turn) < 0.3
+            ? "straight"
+            : turn > 0
+              ? "right"
+              : "left"
         : "arrive",
       turn_distance_m: round(
         c ? Math.max(0, c.stopS - v.s + 10) : v.route.length - v.s,
       ),
       destination: { id: this.world.destination, ...v.route.points.at(-1) },
+      ...(section
+        ? {
+            phase: section.kind,
+            instruction: instructions[section.kind][0],
+            road_name: section.name,
+            speed_limit_mps: section.speedLimit,
+            next_turn: instructions[section.kind][1],
+            turn_distance_m: round(Math.max(0, section.endS - near.s)),
+          }
+        : {}),
     };
   }
-  steeringCandidates(vectors = projectVectors(this.player, false)) {
-    const v = this.player,
-      near = nearestOnPath(v, v.route.points);
+  steeringCandidates() {
+    const state = this.decisionState();
     return Object.fromEntries(
-      Object.entries(vectors).map(([id, vector]) => {
-        const end = vector.evaluation,
-          projected = nearestOnPath(end, v.route.points, near.index);
-        const error = angle(
-          heading(end, pointAt(v.route.points, projected.s + 4)) -
-            vector.evaluation.heading,
-        );
-        return [
-          id,
-          {
-            axis: vector.axis,
-            projected_lane_error_m: round(projected.distance),
-            projected_heading_error_deg: round(
-              (Math.abs(error) * 180) / Math.PI,
-            ),
-            tracking_error: round(projected.distance + Math.abs(error) * 3),
-          },
-        ];
-      }),
+      Object.entries(state.vectors).map(([id, v]) => [
+        id,
+        {
+          ...v,
+          axis: v.steering,
+          tracking_error: v.route_error_m,
+        },
+      ]),
     );
   }
   scanScene() {
@@ -606,9 +1031,11 @@ export class Simulation {
       const forward = dx * Math.sin(v.heading) - dz * Math.cos(v.heading);
       const right = dx * Math.cos(v.heading) + dz * Math.sin(v.heading);
       const distance = Math.hypot(dx, dz);
+      const dynamic = ["car", "motorcycle", "pedestrian"].includes(o.type);
       if (
         distance > range ||
-        Math.abs(Math.atan2(right, forward)) > (65 * Math.PI) / 180
+        (!dynamic &&
+          Math.abs(Math.atan2(right, forward)) > (65 * Math.PI) / 180)
       )
         continue;
       if (blockedByBuilding(v, o, buildings, o.id)) continue;
@@ -624,13 +1051,7 @@ export class Simulation {
         ahead_m: round(forward, 1),
         right_m: round(right, 1),
         speed_mps: round(o.speed || 0, 1),
-        ...(["car", "motorcycle", "pedestrian"].includes(o.type)
-          ? {
-              heading_relative_deg: round(
-                (angle((o.heading || 0) - v.heading) * 180) / Math.PI,
-              ),
-            }
-          : {}),
+        ...(dynamic ? relativeTrafficState(v, o) : {}),
         ...(o.type === "traffic_light"
           ? {
               signal: signalState(
@@ -651,23 +1072,47 @@ export class Simulation {
     );
     this.sensorRange = range;
   }
-  decisionState(vectors = projectVectors(this.player, false)) {
-    if (!this.perception.length) this.scanScene();
+  decisionContextChanged(state) {
+    const sent = state.scene?.intersection;
+    const control = this.crossingFor(this.player);
+    if ((sent?.node_id ?? null) !== (control?.nodeId ?? null)) return true;
+    if (!control) return false;
+    const current = this.rule(this.player);
+    const memory = this.intersectionStopMemory(control);
+    return (
+      (sent.signal !== null && sent.signal !== current.color) ||
+      sent.stop_completed !== current.stopCompleted ||
+      sent.already_entered !== current.distance < -0.7 ||
+      (sent.stop_memory?.stops_on_this_approach ?? 0) !==
+        (memory?.stops_on_this_approach ?? 0)
+    );
+  }
+  decisionState() {
+    // Decisions use the current worker snapshot, not the previous sensor tick.
+    this.scanScene();
     const nav = this.navigation(),
-      env = this.speedEnvelope(this.player),
-      candidates = this.steeringCandidates(vectors);
+      env = this.speedEnvelope(this.player);
+    const observed = new Set(this.perception.map((o) => o.id));
+    const rearPressure = rearTrafficPressure(
+      this.player,
+      this.traffic.filter((o) => observed.has(o.id)),
+    );
     const dynamic = this.perception
       .filter((o) => ["car", "motorcycle", "pedestrian"].includes(o.type))
       .sort(
         (a, b) =>
           Number(
-            b.id === env.conflict?.object_id || b.id === env.lead?.other.id,
+            b.id === env.conflict?.object_id ||
+              b.id === env.lead?.other.id ||
+              b.id === rearPressure?.vehicle_id,
           ) -
           Number(
-            a.id === env.conflict?.object_id || a.id === env.lead?.other.id,
+            a.id === env.conflict?.object_id ||
+              a.id === env.lead?.other.id ||
+              a.id === rearPressure?.vehicle_id,
           ),
       )
-      .slice(0, 5);
+      .slice(0, 10);
     const control = this.crossingFor(this.player);
     const seenControl =
       control &&
@@ -676,46 +1121,156 @@ export class Simulation {
           this.world.objects.find((w) => w.id === o.id)?.nodeId ===
           control.nodeId,
       );
-    return {
+    const uTurn = uTurnApproach(this.player);
+    // Interstate ramps already have continuous section speed profiles. The
+    // city-junction heuristic mistakes a sweeping ramp for a sharp turn.
+    const turnCap = nav.phase
+      ? Infinity
+      : Math.abs(nav.heading_error_deg) > 15 ||
+          (["left", "right"].includes(nav.next_turn) &&
+            nav.turn_distance_m < 24)
+        ? nav.next_turn === "right"
+          ? 7
+          : 8
+        : ["left", "right"].includes(nav.next_turn) && nav.turn_distance_m < 48
+          ? 12
+          : this.world.theme.limit;
+    const ceiling = round(
+      Math.min(env.planningMax, uTurn?.speed_limit_mps ?? Infinity, turnCap),
+      1,
+    );
+    const plan = createDrivingPlan(
+      this.player,
+      this.world,
+      [
+        ...this.world.objects.filter((o) => o.type === "building"),
+        ...this.traffic,
+        ...this.pedestrians,
+      ],
+      this.planRandom,
+      `b${++this.planSequence}`,
+      ceiling,
+      env.rule,
+    );
+    this.lastPlan = plan;
+    // Give Jev readable edges in normal driving. The raw mesh patches remain
+    // in perception, and are also sent during off-road recovery for context.
+    const { drivable_polygons, ...roadSummary } = plan.road;
+    const state = {
+      batch_id: plan.batch_id,
+      route_version: this.routeVersion,
+      global: this.globalNavigation(),
+      driving_style: {
+        name: "aggressive",
+        description:
+          "An aggressive, decisive driver who actively wants to make forward progress. Prefer the fastest useful maneuver and take available gaps promptly. Slowing down still means driving; a full stop needs a concrete current reason.",
+        rules: [
+          "A full-stop choice is offered only within 2.5 meters of a blocking object or a required stop line, at the destination, or when no eligible moving path exists. Otherwise choose a moving vector, reducing speed as needed. Uncertainty alone is not a reason to stop.",
+          "When stopping behind a blocking object, close to within 2 meters bumper-to-object before coming to rest when space permits. Slow earlier as needed; do not park several car lengths back. An imminent collision can require braking sooner.",
+          "For stop signs and red lights, stop right at the line with the front bumper about 0.5 meters before it, not farther back. A distant red light or stop sign is a reason to approach, not to stop immediately.",
+          "Use a stop_at_line moving vector to approach an unserved stop sign or red light. It carries speed toward the line and then stops there; do not wait until 2.5 meters away to begin slowing. Once the stop is served or the light is green, choose a continuing path when clear.",
+          "Remember a completed stop on this approach. Advance after an early stop, and proceed once the required stop is complete and the actual path is clear. Do not repeatedly stop for the same sign.",
+          "At green lights or after a completed stop, move decisively through the junction. Yield only to actual conflicting priority traffic. Do not wait for the whole intersection to become empty.",
+          "Accelerate along a clear on-ramp, match interstate traffic speed while merging, then accelerate to the cruising limit. A ramp-to-merge boundary is a continuous road, not a stop or a U-turn. Slow to fit behind another vehicle only when there is an actual merging conflict.",
+          "A close or closing follower behind should motivate faster forward progress when the road ahead allows it. Traffic behind, alongside, or in the opposite lane is not itself a reason to brake.",
+          "Stay in the right-hand lane, follow a normal traffic queue without passing, and use current signal and collision information. Later hypothetical conflicts are warnings to reassess, not immediate stop commands.",
+        ],
+      },
       speed_mps: round(this.player.speed, 1),
-      limit_mps: this.world.theme.limit,
-      speed_ceiling_mps: round(
-        Math.min(
-          env.max,
-          Math.abs(nav.heading_error_deg) > 15 ||
-            (["left", "right"].includes(nav.next_turn) &&
-              nav.turn_distance_m < 24)
-            ? 5
-            : ["left", "right"].includes(nav.next_turn) &&
-                nav.turn_distance_m < 48
-              ? 10
-              : this.world.theme.limit,
+      braking: {
+        max_deceleration_mps2: BRAKING,
+        stopping_distance_m: round(this.player.speed ** 2 / (2 * BRAKING), 1),
+        comfortable_stopping_distance_m: round(this.player.speed ** 2 / 7, 1),
+        decision_allowance_m: round(Math.abs(this.player.speed) * 0.35, 1),
+      },
+      limit_mps: nav.speed_limit_mps ?? this.world.theme.limit,
+      speed_ceiling_mps: plan.speedCap,
+      speed_constraints: {
+        traffic_and_destination_cap_mps: round(env.planningMax, 1),
+        required_stop_approach: plan.stopApproach,
+        uturn_approach: uTurn
+          ? {
+              curve_ahead_m: round(uTurn.distance_m, 1),
+              approach_cap_mps: round(uTurn.speed_limit_mps, 1),
+              curve_speed_mps: 3,
+            }
+          : null,
+      },
+      road: plan.recovery.active ? plan.road : roadSummary,
+      lane: plan.lane,
+      traffic: {
+        queue: plan.queue,
+        rear_pressure: rearPressure,
+        stopped_for_s: round(
+          this.player.waitingSince == null
+            ? 0
+            : this.time - this.player.waitingSince,
+          1,
         ),
-        1,
-      ),
+        deadlock_release: env.released,
+      },
+      recovery: plan.recovery,
       bend_deg: round(Math.abs(nav.heading_error_deg), 1),
       destination_m: round(nav.remaining_m, 1),
       turn: { direction: nav.next_turn, in_m: round(nav.turn_distance_m, 1) },
+      ...(nav.phase
+        ? {
+            trip: {
+              phase: nav.phase,
+              instruction: nav.instruction,
+              road: nav.road_name,
+            },
+          }
+        : {}),
       scene: {
+        blocking_object: plan.blockingObject,
+        observed_at_s: round(this.time, 2),
+        coordinates:
+          "Car-relative meters: ahead_m is positive ahead and negative behind; right_m is positive to the right. heading_relative_deg=0 is the same direction, 180 is oncoming. Positive relative_velocity_ahead_mps means moving forward relative to this car.",
+        traffic_view_deg: 360,
         range_m: Math.round(this.sensorRange),
-        intersection:
-          control && seenControl
-            ? {
-                signal: env.rule.color,
-                visible: !!seenControl,
-                in_m: round(env.rule.distance, 1),
-                must_yield: env.rule.mustStop,
-                reason: env.rule.reason,
-                stop_completed: env.rule.stopCompleted,
-              }
-            : null,
+        intersection: control
+          ? {
+              node_id: control.nodeId,
+              control: this.world.byId[control.nodeId].control,
+              signal: seenControl ? env.rule.color : null,
+              visible: !!seenControl,
+              stop_line_ahead_m: round(
+                stopLineDistance(this.player, plan.stopLine),
+                1,
+              ),
+              stop_line_position: {
+                x: round(plan.stopLine.x, 1),
+                z: round(plan.stopLine.z, 1),
+              },
+              already_entered: env.rule.distance < -0.7,
+              stop_completed: env.rule.stopCompleted,
+              stop_dwell_s: PLAYER_STOP_DWELL_S,
+              stop_memory: this.intersectionStopMemory(control),
+              earlier_arrivals: this.traffic
+                .filter((other) => {
+                  const stopped = other.stops[control.nodeId];
+                  return (
+                    stopped &&
+                    !stopped.passed &&
+                    this.crossingFor(other)?.nodeId === control.nodeId &&
+                    stopped.arrived <
+                      (this.player.stops[control.nodeId]?.arrived ?? Infinity)
+                  );
+                })
+                .map((other) => other.id),
+            }
+          : null,
         nearby: dynamic,
         ...(env.lead && env.gap < this.sensorRange
           ? {
               following: {
                 id: env.lead.other.id,
                 gap_m: round(env.gap, 1),
-                minimum_gap_m: env.lead.other.type === "motorcycle" ? 4 : 3,
+                minimum_gap_m: round(
+                  followingGap(this.player, env.lead.other),
+                  1,
+                ),
               },
             }
           : {}),
@@ -724,18 +1279,39 @@ export class Simulation {
               hazard: {
                 id: env.conflict.object_id,
                 type: env.conflict.type,
+                applies_to: "current_maneuver",
                 in_s: round(env.conflict.time_s, 1),
-                ahead_m: round(env.conflict.distance_m, 1),
+                ahead_m: env.conflict.ahead_m,
+                right_m: env.conflict.right_m,
+                relative_position: env.conflict.relative_position,
+                distance_along_path_m: round(
+                  env.conflict.distance_along_path_m,
+                  1,
+                ),
+                braking_reduces_risk: env.conflict.braking_reduces_risk,
               },
             }
           : {}),
       },
-      vectors: Object.fromEntries(
-        Object.entries(candidates).map(([id, c]) => [id, c.tracking_error]),
-      ),
+      vectors: plan.vectors,
     };
+    state.stop_availability = stopAvailability(state);
+    if (!state.stop_availability.available) {
+      state.vectors = Object.fromEntries(
+        Object.entries(state.vectors).filter(
+          ([, vector]) => vector.velocity_mps !== 0,
+        ),
+      );
+      plan.vectors = state.vectors;
+      for (const id of Object.keys(plan.projections))
+        if (!Object.hasOwn(state.vectors, id)) delete plan.projections[id];
+    }
+    plan.eligible = candidateChoices(state);
+    this.lastDecisionState = state;
+    return state;
   }
   observation(full = false) {
+    if (!this.lastPlan && !this.backgroundPlanning) this.decisionState();
     const v = this.player,
       buildings = this.world.objects.filter((o) => o.type === "building"),
       all = [
@@ -752,7 +1328,8 @@ export class Simulation {
         f = dx * Math.sin(v.heading) - dz * Math.cos(v.heading),
         l = dx * Math.cos(v.heading) + dz * Math.sin(v.heading),
         bearing = (Math.atan2(l, f) * 180) / Math.PI;
-      if (d > 80 || Math.abs(bearing) > 65) continue;
+      const dynamic = ["car", "motorcycle", "pedestrian"].includes(o.type);
+      if (d > 80 || (!dynamic && Math.abs(bearing) > 65)) continue;
       if (blockedByBuilding(v, o, buildings, o.id)) {
         occluded.push(o.id);
         continue;
@@ -765,6 +1342,7 @@ export class Simulation {
         forward_m: round(f),
         right_m: round(l),
         bearing_deg: round(bearing),
+        ...(dynamic ? relativeTrafficState(v, o) : {}),
         speed_mps: round(o.speed || 0),
         heading_deg:
           o.heading === undefined
@@ -797,6 +1375,7 @@ export class Simulation {
         speed_mps: round(v.speed),
         steering_axis: round(v.steering),
         velocity_axis_mps: round(v.target),
+        applied_velocity_mps: round(v.appliedTarget ?? v.target),
         dimensions: { width: v.width, length: v.depth },
         control: this.autopilot ? "jev" : "manual",
         pedals: this.autopilot ? null : { ...this.pedals },
@@ -804,7 +1383,8 @@ export class Simulation {
       navigation: this.navigation(),
       road_rules: {
         drive_on: "right",
-        speed_limit_mps: this.world.theme.limit,
+        speed_limit_mps:
+          routeSection(v, v.s)?.speedLimit ?? this.world.theme.limit,
         next_control: {
           ...env.rule,
           distance: round(
@@ -812,12 +1392,13 @@ export class Simulation {
           ),
         },
         lead_vehicle_gap_m: Number.isFinite(env.gap) ? round(env.gap) : null,
-        stop_dwell_s: 1.2,
+        stop_dwell_s: PLAYER_STOP_DWELL_S,
         amber_rule:
           "Stop if there is sufficient braking distance; otherwise clear the intersection",
       },
       sensor: {
         horizontal_fov_deg: 130,
+        traffic_fov_deg: 360,
         range_m: 80,
         occlusion: "line of sight blocked by building footprints",
         visible_count: visible.length,
@@ -826,7 +1407,9 @@ export class Simulation {
         discovered_objects: Object.fromEntries(this.discovered),
         live_nearby: this.perception,
       },
-      steering_candidates: this.steeringCandidates(),
+      road: this.lastPlan?.road,
+      recovery: this.lastPlan?.recovery,
+      steering_candidates: this.lastPlan?.vectors || {},
       telemetry: {
         collisions: this.collisions,
         crash: this.crash,

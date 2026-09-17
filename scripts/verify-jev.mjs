@@ -21,6 +21,7 @@ while (
   cost += decision.cost_usd;
   inputTokens += decision.usage.input_tokens;
   maxSpeed = Math.max(maxSpeed, sim.player.speed);
+  sim.player.maneuver = state.vectors[decision.answers.vector.choice];
   sim.player.steering = decision.controls.steering;
   sim.player.target = decision.controls.velocity;
   for (let i = 0; i < 6; i++) sim.step(0.05);
@@ -34,7 +35,7 @@ while (
         speed: sim.player.speed,
         choice: [
           decision.answers.vector.choice,
-          decision.answers.velocity.choice,
+          decision.controls.velocity,
         ],
         control: sim.rule(sim.player),
         safety: sim.brakeReason,

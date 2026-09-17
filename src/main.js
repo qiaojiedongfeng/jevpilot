@@ -3,7 +3,7 @@ import {
   createIcons,
   Route,
   Braces,
-  Shuffle,
+  RotateCw,
   Video,
   Pause,
   Play,
@@ -18,6 +18,7 @@ import {
   Flag,
   ArrowUpRight,
   X,
+  Copy,
   Download,
   RotateCcw,
   Keyboard,
@@ -25,14 +26,15 @@ import {
   ShieldCheck,
 } from "lucide";
 import { Simulation } from "./simulation.js";
+import { BackgroundPlanner } from "./background-planner.js";
 import { DriveScene } from "./scene.js";
 import { THEMES } from "./world.js";
-import { VECTOR_NAMES } from "./planning.js";
-import { clamp } from "./math.js";
+import { candidateName, decisionControls } from "./planning.js";
+import { clamp, nearestOnPath } from "./math.js";
 const icons = {
   Route,
   Braces,
-  Shuffle,
+  RotateCw,
   Video,
   Pause,
   Play,
@@ -47,6 +49,7 @@ const icons = {
   Flag,
   ArrowUpRight,
   X,
+  Copy,
   Download,
   RotateCcw,
   Keyboard,
@@ -90,7 +93,7 @@ const keys = new Set(),
   };
 $("app").innerHTML = `
 <main class="drive-area" aria-label="3D driving simulator"><canvas id="world-canvas" aria-label="Interactive three-dimensional driving world"></canvas><div id="vector-labels" aria-label="Jev motion vector probabilities"></div></main>
-<header class="topbar"><a href="/" class="brand"><span class="brand-mark">${icon("route")}</span><b>Jevpilot</b></a><div class="world-picker glass"><select id="world-select" aria-label="World environment"><option value="city">Skyline City</option><option value="town">Small town</option><option value="highway">Interstate 08</option></select><span class="seed" id="seed-label"></span><button id="new-world" title="Generate a new world" aria-label="Generate a new world">${icon("shuffle")}</button></div><div class="top-tools glass"><button id="camera" title="Change camera · C" aria-label="Change camera">${icon("video")}<span id="camera-name">Chase</span></button><span class="divider"></span><button id="scene-json" aria-label="Inspect live JSON" title="Inspect live JSON">${icon("braces")}<span>JSON</span></button><button id="fullscreen" aria-label="Enter fullscreen" title="Fullscreen">${icon("maximize")}</button></div></header>
+<header class="topbar"><a href="/" class="brand"><span class="brand-mark">${icon("route")}</span><b>Jevpilot</b></a><div class="world-picker glass"><select id="world-select" aria-label="World environment"><option value="city">Skyline City</option><option value="town">Small town</option><option value="highway">Interstate 08</option></select><span class="seed" id="seed-label"></span><button id="new-world" title="Refresh world" aria-label="Refresh world">${icon("rotate-cw")}</button></div><div class="top-tools glass"><button id="camera" title="Change camera · C" aria-label="Change camera">${icon("video")}<span id="camera-name">Chase</span></button><span class="divider"></span><button id="candidates-toggle" aria-label="Show steering candidates" aria-pressed="false" title="Show steering candidates">${icon("route")}<span>Candidates</span></button><button id="scene-json" aria-label="Inspect live JSON" title="Inspect live JSON">${icon("braces")}<span>JSON</span></button><button id="fullscreen" aria-label="Enter fullscreen" title="Fullscreen">${icon("maximize")}</button></div></header>
 <div class="navigation-card glass"><span id="turn-icon">${icon("arrow-up")}</span><div><strong id="next-maneuver">Continue straight</strong><span id="turn-distance"></span></div><span class="nav-divider"></span><span id="remaining"></span><button id="map-toggle" aria-label="Toggle route map" aria-pressed="true" title="Route map">${icon("map")}</button></div>
 <div id="minimap" class="minimap glass"><canvas id="map-canvas" width="380" height="310" aria-label="Track-up road map with traffic and destination"></canvas></div>
 <div id="paused-overlay" hidden><div class="glass"><span>${icon("pause")} Paused</span><button id="resume" class="primary">Resume driving</button></div></div>
@@ -99,13 +102,82 @@ $("app").innerHTML = `
 <aside id="controls-panel" class="controls-panel glass" hidden><div class="panel-heading"><span>DRIVING CONTROLS</span><button id="close-controls" aria-label="Close driving controls">${icon("x")}</button></div><label>Steering <output id="steering-output">0.00</output></label><input id="steering" type="range" min="-1" max="1" step=".01" value="0" aria-label="Steering axis"/><div class="range-labels"><span>LEFT</span><span>RIGHT</span></div><label><span id="pedal-label">Accelerator</span><output id="velocity-output">Released</output></label><input id="velocity" type="range" min="-1" max="1" step=".01" value="0" aria-label="Accelerator pedal"/><div class="range-labels"><span id="pedal-min">BRAKE / REVERSE</span><span id="pedal-max">ACCELERATE</span></div><label class="check-label"><span>${icon("shield-check")} Safety brake</span><input id="safety" type="checkbox" checked/></label><label class="check-label"><span>Show selected path</span><input id="show-vectors" type="checkbox" checked/></label><div class="control-actions"><button id="reset-car" class="secondary">${icon("rotate-ccw")} Restart trip</button><button id="help" aria-label="Keyboard shortcuts">${icon("keyboard")}</button></div><div class="session-stats"><span><b id="calls">0</b> calls</span><span><b id="tokens">0</b> tokens</span><span><b id="latency">—</b> ms</span></div></aside>
 <dialog id="crash-dialog" aria-labelledby="crash-title" aria-describedby="crash-description"><span class="crash-symbol">${icon("x")}</span><span class="eyebrow">DRIVE ENDED</span><h1 id="crash-title">Game over.</h1><p id="crash-description"></p><div class="crash-stats"><div><strong id="crash-speed"></strong><span>km/h at impact</span></div><div><strong id="crash-distance"></strong><span>meters driven</span></div></div><button id="retry-drive" class="primary">${icon("rotate-ccw")} Restart drive</button><button id="crash-new-world" class="secondary">Try a new world ${icon("arrow-up-right")}</button></dialog>
 <div id="toast" role="status" hidden></div>
-<dialog id="json-dialog"><div class="json-header"><div>${icon("braces")}<strong>Under the hood</strong><span id="json-live">LIVE · 4 Hz</span></div><button id="close-json" aria-label="Close JSON inspector">${icon("x")}</button></div><div class="json-toolbar"><div class="json-tabs"><button data-tab="request" class="active">Jev input</button><button data-tab="sensor">Perception</button><button data-tab="world">Full world</button><button data-tab="decision">Response</button></div><div class="json-actions"><button id="freeze-json">Freeze</button><button id="download-json">${icon("download")} Download</button></div></div><p id="json-description">Compact control state sent to Jev. Full perception and world geometry stay in the simulator.</p><pre id="json-content"></pre></dialog>
-<dialog id="help-dialog"><button id="close-help" class="dialog-close" aria-label="Close help">${icon("x")}</button><span class="eyebrow">YOUR NEXT DRIVE</span><h2>Take the wheel.</h2><div class="help-keys"><span><kbd>W / ↑</kbd> Hold accelerator</span><span><kbd>S / ↓</kbd> Brake / reverse</span><span><kbd>A / D</kbd> Steer</span><span><kbd>SPACE</kbd> Brake</span><span><kbd>J</kbd> Jev autopilot</span><span><kbd>C</kbd> Camera</span><span><kbd>P</kbd> Pause</span></div><p>Drag the scene to orbit in Chase or Bird’s eye; drag to look around in Driver view. Scroll to zoom outside; double-click to recenter. Tap A/D for small corrections; hold for a sharper turn and release to recenter. Hold W to accelerate; release to coast with drag. S brakes, then reverses once stopped. Space applies the brake. Autopilot sets target speed directly.</p><p>The bright blue line is Jev's selected three-second plan. All candidate probabilities are available in the JSON inspector. The optional safety brake can reduce speed for a missed hazard; interventions are shown beside the autopilot button.</p><p class="asset-credits">Vehicle: <a href="https://sketchfab.com/3d-models/tesla-model-y-2021-c0a86cac582d4b33aba0fb1b1912d970" target="_blank" rel="noreferrer">Tesla Model Y 2021</a> by 763468712, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a>. Geometry adapted by Tina 3D Tesla; optimized, re-materialed, and wheel-rigged for Jevpilot. Tree, shrub, streetlight, surface textures and sky: <a href="https://polyhaven.com" target="_blank" rel="noreferrer">Poly Haven</a>, CC0.</p><p>Driving keys take back control. Use the JSON button for live inputs, full world state, probabilities, and session telemetry.</p></dialog>`;
+<dialog id="json-dialog"><div class="json-header"><div>${icon("braces")}<strong>Under the hood</strong><span id="json-live">LIVE · 4 Hz</span></div><button id="close-json" aria-label="Close JSON inspector">${icon("x")}</button></div><div class="json-toolbar"><div class="json-tabs"><button data-tab="request" class="active">Jev input</button><button data-tab="sensor">Perception</button><button data-tab="world">Full world</button><button data-tab="decision">Response</button></div><div class="json-actions"><button id="freeze-json">Freeze</button><button id="copy-json" aria-label="Copy displayed JSON">${icon("copy")} <span id="copy-json-label" aria-live="polite">Copy</span></button><button id="download-json">${icon("download")} Download</button></div></div><p id="json-description">Compact control state sent to Jev. Full perception and world geometry stay in the simulator.</p><pre id="json-content"></pre></dialog>
+<dialog id="help-dialog"><button id="close-help" class="dialog-close" aria-label="Close help">${icon("x")}</button><span class="eyebrow">YOUR NEXT DRIVE</span><h2>Take the wheel.</h2><div class="help-keys"><span><kbd>W / ↑</kbd> Hold accelerator</span><span><kbd>S / ↓</kbd> Brake / reverse</span><span><kbd>A / D</kbd> Steer</span><span><kbd>SPACE</kbd> Brake</span><span><kbd>J</kbd> Jev autopilot</span><span><kbd>C</kbd> Camera</span><span><kbd>P</kbd> Pause</span></div><p>Drag the scene to orbit in Chase or Bird’s eye; drag to look around in Driver view. Scroll to zoom outside; double-click to recenter. Tap A/D for small corrections; hold for a sharper turn and release to recenter. Hold W to accelerate; release to coast with drag. S brakes, then reverses once stopped. Space applies the brake. Autopilot sets target speed directly.</p><p>The bright blue line is Jev's selected three-second plan. Use Candidates to see the sampled paths: forward in blue/cyan, reverse in purple, lane departures in amber, and predicted collisions in orange. Choice probabilities are available in the JSON inspector. The optional safety brake can reduce speed for a missed hazard; interventions are shown beside the autopilot button.</p><p class="asset-credits">Vehicle: <a href="https://sketchfab.com/3d-models/tesla-model-y-2021-c0a86cac582d4b33aba0fb1b1912d970" target="_blank" rel="noreferrer">Tesla Model Y 2021</a> by 763468712, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a>. Geometry adapted by Tina 3D Tesla; optimized, re-materialed, and wheel-rigged for Jevpilot. Tree, shrub, streetlight, surface textures and sky: <a href="https://polyhaven.com" target="_blank" rel="noreferrer">Poly Haven</a>, CC0.</p><p>Driving keys take back control. Use the JSON button for live inputs, full world state, probabilities, and session telemetry.</p></dialog>`;
 createIcons({ icons });
 const scene = new DriveScene($("world-canvas"), sim, $("vector-labels")),
   map = $("map-canvas").getContext("2d");
-function toast(text) {
+const planner = new BackgroundPlanner();
+sim.backgroundPlanning = true;
+let planningJob = null,
+  rerouting = false,
+  previewError = false;
+async function refreshPlan() {
+  if (planningJob) return planningJob;
+  const token = generation,
+    version = sim.routeVersion;
+  const job = planner
+    .run("plan", sim)
+    .then((result) => {
+      if (token !== generation || version !== sim.routeVersion || sim.crash)
+        return null;
+      sim.lastPlan = result.plan;
+      sim.lastDecisionState = result.state;
+      sim.routeChoices = result.routeChoices;
+      sim.routeChoicesOrigin = result.routeChoicesOrigin;
+      sim.nextRouteChoices = result.nextRouteChoices;
+      return result;
+    })
+    .finally(() => {
+      if (planningJob === job) planningJob = null;
+    });
+  planningJob = job;
+  return job;
+}
+function requestPreview() {
+  if (sim.autopilot || sim.crash) return;
+  refreshPlan()
+    .then((result) => {
+      if (result && !sim.autopilot) scene.vectors.setCandidates(result.plan);
+    })
+    .catch((error) => {
+      if (!previewError) {
+        previewError = true;
+        toast(error.message);
+      }
+    });
+}
+sim.requestReroute = async () => {
+  if (rerouting || !sim.routeChoiceNeeded()) return;
+  rerouting = true;
+  const token = generation,
+    version = sim.routeVersion;
+  try {
+    const next = await planner.run("reroute", sim);
+    if (
+      !next ||
+      token !== generation ||
+      version !== sim.routeVersion ||
+      sim.crash ||
+      !sim.routeChoiceNeeded()
+    )
+      return;
+    if (next.route.ids.join(",") === sim.player.route.ids.join(",")) return;
+    sim.installRoute({
+      ...next,
+      progress: nearestOnPath(sim.player, next.route.points).s,
+    });
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    rerouting = false;
+  }
+};
+if (import.meta.hot) import.meta.hot.dispose(() => planner.dispose());
+
+function toast(text, type = "info") {
   $("toast").textContent = text;
+  $("toast").classList.toggle("error", type === "error");
   $("toast").hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => ($("toast").hidden = true), 4200);
@@ -141,7 +213,7 @@ function syncPilot() {
 }
 function setPilot(on) {
   if (on && !configured) {
-    toast("Jev is not connected. Check the API key on the server.");
+    toast("Jev is not connected. Check the API key on the server.", "error");
     return;
   }
   if (sim.crash || (on && sim.complete)) return;
@@ -155,6 +227,7 @@ function setPilot(on) {
   sim.player.target = 0;
   sim.player.steering = 0;
   sim.player.steeringProgress = 0;
+  sim.player.maneuver = null;
   scene.vectors.clear();
   syncPilot();
 }
@@ -165,12 +238,15 @@ function resetWorld(seed = sim.world.seed, type = sim.world.type) {
   document.body.classList.remove("crashed");
   keys.clear();
   sim.reset(seed, type);
+  planner.reset();
+  previewError = false;
   manualThrottle = manualSteering = 0;
   lastApplied = 0;
   lastDecision = null;
   lastInput = null;
   scene.build();
   scene.vectors.enabled = $("show-vectors").checked;
+  scene.vectors.showCandidates = showCandidates;
   refreshWorld();
   syncPilot();
   $("paused-overlay").hidden = true;
@@ -202,6 +278,14 @@ function togglePause() {
   createIcons({ icons });
 }
 $("autopilot").onclick = () => setPilot(!sim.autopilot);
+let showCandidates = false,
+  candidatePreviewAt = 0;
+$("candidates-toggle").onclick = () => {
+  showCandidates = !showCandidates;
+  scene.vectors.showCandidates = showCandidates;
+  $("candidates-toggle").setAttribute("aria-pressed", String(showCandidates));
+  if (showCandidates && !scene.vectors.plan) requestPreview();
+};
 $("new-world").onclick = () => resetWorld(Math.floor(Math.random() * 999999));
 $("world-select").onchange = (e) =>
   resetWorld(Math.floor(Math.random() * 999999), e.target.value);
@@ -343,7 +427,14 @@ $("freeze-json").onclick = () => {
   syncFreeze();
 };
 function inspectData() {
-  if (inspectorTab === "request") return sim.decisionState();
+  if (inspectorTab === "request") {
+    if (
+      !sim.lastDecisionState ||
+      (!sim.autopilot && !showCandidates && !sim.paused)
+    )
+      requestPreview();
+    return sim.lastDecisionState || { status: "Preparing driving state…" };
+  }
   if (inspectorTab === "decision")
     return {
       response: lastDecision,
@@ -357,6 +448,48 @@ function inspectData() {
     };
   return sim.observation(inspectorTab === "world");
 }
+let copyFeedbackTimer;
+$("copy-json").onclick = async () => {
+  // Copy exactly the snapshot on screen, including when the inspector is frozen.
+  const text = $("json-content").textContent;
+  const button = $("copy-json");
+  clearTimeout(copyFeedbackTimer);
+  button.disabled = true;
+  try {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Keep the fallback inside the modal so it can receive focus for copying.
+      const field = document.createElement("textarea");
+      field.value = text;
+      field.readOnly = true;
+      field.style.cssText = "position:fixed;left:-9999px;top:0";
+      $("json-dialog").append(field);
+      try {
+        field.select();
+        if (!document.execCommand("copy")) throw Error("Clipboard unavailable");
+      } finally {
+        field.remove();
+      }
+    }
+    $("copy-json-label").textContent = "Copied!";
+  } catch {
+    inspectFrozen = true;
+    syncFreeze();
+    const range = document.createRange();
+    range.selectNodeContents($("json-content"));
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    $("copy-json-label").textContent = "Press ⌘C / Ctrl+C";
+  } finally {
+    button.disabled = false;
+    button.focus({ preventScroll: true });
+    copyFeedbackTimer = setTimeout(() => {
+      $("copy-json-label").textContent = "Copy";
+    }, 3000);
+  }
+};
 $("download-json").onclick = () => {
   const text = inspectFrozen
       ? $("json-content").textContent
@@ -393,9 +526,19 @@ async function decide() {
     return;
   busy = true;
   const token = generation,
-    state = sim.decisionState(),
     started = performance.now();
   try {
+    const planned = await refreshPlan();
+    if (
+      !planned ||
+      token !== generation ||
+      !sim.autopilot ||
+      sim.paused ||
+      sim.crash
+    )
+      return;
+    const { state, plan } = planned;
+    scene.vectors.setCandidates(plan);
     const res = await fetch("/api/decide", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -410,18 +553,43 @@ async function decide() {
     tally.output += data.usage.output_tokens;
     tally.latencies.push(data.latency_ms);
     if (tally.latencies.length > 25) tally.latencies.shift();
-    if (token !== generation || !sim.autopilot || sim.paused || sim.crash)
+    if (
+      token !== generation ||
+      state.route_version !== sim.routeVersion ||
+      !sim.autopilot ||
+      sim.paused ||
+      sim.crash
+    )
       return;
+    const controls = decisionControls(state, data);
+    if (!controls) throw Error("Jev returned a mismatched candidate batch.");
     const now = performance.now();
+    if (now - started > 1800)
+      throw Error("Jev decision expired before it arrived. Replanning.");
+    if (sim.decisionContextChanged(state)) {
+      // A changed light or a newly completed stop needs another Jev decision.
+      // Keep the previous maneuver briefly instead of inserting a new brake.
+      nextDecision = 0;
+      return;
+    }
+    if (
+      data.answers.route?.choice &&
+      data.answers.route.choice !== "keep" &&
+      sim.chooseRoute(data.answers.route.choice)
+    ) {
+      nextDecision = 0;
+      return;
+    }
     if (lastApplied) tally.intervals.push(now - lastApplied);
     if (tally.intervals.length > 20) tally.intervals.shift();
     lastDecision = { ...data, received_at_simulation_s: sim.time };
     lastInput = state;
     lastApplied = now;
     errors = 0;
-    sim.player.steering = data.controls.steering;
-    sim.player.target = data.controls.velocity;
-    scene.vectors.setAnswer(data.answers.vector);
+    sim.player.maneuver = state.vectors[data.selection.choice];
+    sim.player.steering = controls.steering;
+    sim.player.target = controls.velocity;
+    scene.vectors.setAnswer(data.selection, plan);
     nextDecision = started + 125; // Up to 8 Hz, one request in flight.
   } catch (error) {
     if (token === generation) {
@@ -429,12 +597,13 @@ async function decide() {
       scene.vectors.clear();
       errors++;
       nextDecision = performance.now() + Math.min(15000, 1000 * 2 ** errors);
-      toast(error.message);
+      toast(error.message, "error");
       sim.event(error.message, "error");
       if (errors >= 3) {
         setPilot(false);
         toast(
           "Jev paused after three failed requests. Toggle autopilot to reconnect.",
+          "error",
         );
       }
     }
@@ -464,7 +633,17 @@ function drawMap() {
       i ? map.lineTo(...pt(p)) : map.moveTo(...pt(p)),
     );
     map.stroke();
-  } else
+  }
+  if (w.connectorRoads) {
+    for (const road of w.connectorRoads) {
+      map.lineWidth = road.width * scale;
+      map.beginPath();
+      road.points.forEach((p, i) =>
+        i ? map.lineTo(...pt(p)) : map.moveTo(...pt(p)),
+      );
+      map.stroke();
+    }
+  } else if (!w.roadSamples)
     for (const e of w.edges) {
       map.lineWidth = e.width * scale;
       map.beginPath();
@@ -512,39 +691,48 @@ function updateUI() {
   const v = sim.player,
     nav = sim.navigation();
   $("speed").textContent = Math.round(Math.abs(v.speed) * 3.6);
+  $("speed-limit").textContent = Math.round(
+    (nav.speed_limit_mps ?? sim.world.theme.limit) * 3.6,
+  );
   $("remaining").textContent =
     nav.remaining_m >= 1000
       ? `${(nav.remaining_m / 1000).toFixed(1)} km`
       : `${Math.round(nav.remaining_m)} m`;
   $("next-maneuver").textContent =
-    nav.next_turn === "arrive"
+    nav.instruction ||
+    (nav.next_turn === "arrive"
       ? sim.world.type === "highway"
         ? "Follow Interstate 08"
         : "Destination ahead"
       : nav.next_turn === "straight"
         ? "Continue straight"
-        : `Turn ${nav.next_turn}`;
+        : nav.next_turn === "uturn"
+          ? "Make a U-turn"
+          : `Turn ${nav.next_turn}`);
   $("turn-distance").textContent =
     nav.next_turn === "arrive"
       ? "to your destination"
       : `in ${Math.round(nav.turn_distance_m)} m`;
   const turnIcon = {
+    uturn: "rotate-ccw",
     left: "corner-up-left",
     right: "corner-up-right",
     straight: "arrow-up",
     arrive: "flag",
+    merge: "corner-up-left",
+    exit: "corner-up-right",
   }[nav.next_turn];
   if ($("turn-icon").dataset.icon !== turnIcon) {
     $("turn-icon").innerHTML = icon(turnIcon);
     $("turn-icon").dataset.icon = turnIcon;
     createIcons({ icons });
   }
-  const answer = lastDecision?.answers.vector,
+  const answer = lastDecision?.selection,
     stale = !lastApplied || performance.now() - lastApplied > 1800;
   $("pilot-state").textContent = sim.autopilot
     ? stale
       ? "Reading the road…"
-      : `${VECTOR_NAMES[answer.choice]} · ${Math.round(answer.probabilities[answer.choice] * 100)}%`
+      : `${candidateName(scene.vectors.answeredPlan?.vectors[answer.choice])} · ${Math.round(answer.confidence * 100)}%`
     : sim.crash
       ? "Drive ended"
       : "Free play";
@@ -555,17 +743,24 @@ function updateUI() {
         ? "Waiting for a fresh decision"
         : `${Math.round(v.target * 3.6)} km/h target · ${lastDecision.latency_ms} ms`
     : "WASD to drive · Space to brake";
-  if (sim.autopilot && !stale && v.speed < 0.5 && v.target < 0.5) {
-    const rule = sim.rule(v);
-    $("context-message").textContent = rule.mustStop
-      ? `${rule.reason}${rule.color === "green" ? " · light is green" : ""}`
-      : nav.remaining_m < 4
-        ? "Stopping at destination"
-        : "Road clear · replanning";
+  if (
+    sim.autopilot &&
+    !stale &&
+    !sim.brakeReason &&
+    v.speed < 0.5 &&
+    v.target < 0.5
+  ) {
+    $("context-message").textContent = "Jev chose to wait · evaluating traffic";
   }
-  if (nav.route_offset_m > 7)
+  if (nav.rerouted)
     $("context-message").textContent =
-      "Off route · return to the line or restart";
+      "Route recalculated · continuing to your destination";
+  else if (rerouting && sim.routeChoiceNeeded())
+    $("context-message").textContent = "Recalculating route…";
+  else if (sim.lastPlan?.recovery.active)
+    $("context-message").textContent = sim.lastPlan.road.on_road
+      ? "Returning to the route"
+      : "Finding a way back onto the road";
   const hz = tally.intervals.length
     ? 1000 /
       (tally.intervals.reduce((a, b) => a + b, 0) / tally.intervals.length)
@@ -626,6 +821,17 @@ function animate(now) {
     const steps = Math.max(1, Math.ceil(dt / 0.025));
     for (let i = 0; i < steps; i++) sim.step(dt / steps);
   }
+  if (scene.routeVersion !== sim.routeVersion) {
+    scene.routeVersion = sim.routeVersion;
+    generation++;
+    lastApplied = 0;
+    lastDecision = null;
+    lastInput = null;
+    nextDecision = 0;
+    scene.vectors.clear();
+    const destination = sim.player.route.points.at(-1);
+    scene.destination.position.set(destination.x, 0.2, destination.z);
+  }
   if (sim.crash && !crashHandled) {
     crashHandled = true;
     generation++;
@@ -649,6 +855,16 @@ function animate(now) {
     $("crash-distance").textContent = Math.round(sim.distance);
     $("crash-dialog").showModal();
   }
+  if (
+    showCandidates &&
+    !sim.autopilot &&
+    !sim.paused &&
+    !sim.crash &&
+    now - candidatePreviewAt > 500
+  ) {
+    candidatePreviewAt = now;
+    requestPreview();
+  }
   scene.render(dt);
   if (!$("minimap").hidden) drawMap();
   uiTime += dt;
@@ -666,9 +882,13 @@ fetch("/api/status")
   .then((r) => r.json())
   .then((data) => {
     configured = data.configured;
+    $("connection").classList.toggle("error", !configured);
     $("connection").innerHTML =
       `<i class="dot ${configured ? "connected" : ""}"></i>${configured ? "Jev connected" : "API key needed"}`;
   })
-  .catch(() => ($("connection").textContent = "Server unavailable"));
+  .catch(() => {
+    $("connection").textContent = "Server unavailable";
+    $("connection").classList.add("error");
+  });
 
 export { sim, scene };
