@@ -1,6 +1,6 @@
 # Cloudflare hosting
 
-Push to `main` in **standardagents/jevdrive** to deploy **jevpilot.standardagents.ai**. Cloudflare Workers Builds watches the repository through its GitHub integration; no GitHub Actions workflow is involved.
+Push to `main` in **standardagents/jevpilot** to deploy **jevpilot.standardagents.ai**. Cloudflare Workers Builds watches the repository through its GitHub integration; no GitHub Actions workflow is involved.
 
 The Cloudflare build settings are:
 
