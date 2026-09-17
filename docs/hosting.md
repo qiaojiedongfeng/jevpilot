@@ -1,6 +1,18 @@
 # Cloudflare hosting
 
-`npm run deploy` builds the two Vite entry points and deploys the Worker and assets to **jevpilot.standardagents.ai**. `wrangler.jsonc` contains the domain, non-secret Platform project ID, and bindings. Keep the account Durable Object namespace and migration history across releases; replacing them would reset credits.
+Push to `main` in **standardagents/jevdrive** to deploy **jevpilot.standardagents.ai**. Cloudflare Workers Builds watches the repository through its GitHub integration; no GitHub Actions workflow is involved.
+
+The Cloudflare build settings are:
+
+- Production branch: `main`; preview builds disabled.
+- Root directory: `/`.
+- Build command: `npm run build`.
+- Deploy command: `npx wrangler deploy`.
+- Build caching enabled; Cloudflare-managed deployment token: `jevpilot-workers-builds`.
+
+Cloudflare installs dependencies from `package-lock.json`, builds both Vite entry points, and deploys the Worker with its static assets. Check the commit's **Workers Builds: jevpilot** status or the Worker's Deployments tab for the release result. `npm run deploy` remains available for an explicit manual recovery, but normal releases happen by pushing to `main`.
+
+`wrangler.jsonc` contains the domain, non-secret Platform project ID, and bindings. Keep the account Durable Object namespace and migration history across releases; replacing them would reset credits.
 
 Set three Cloudflare Worker secrets with `npx wrangler secret put NAME`:
 
@@ -8,7 +20,7 @@ Set three Cloudflare Worker secrets with `npx wrangler secret put NAME`:
 - `PLATFORM_PARTNER_SECRET`: the production Standard Agents partner credential.
 - `SESSION_SECRET`: a randomly generated 32-byte or longer signing secret. Rotating it signs everyone out; it does not reset credit.
 
-No secret belongs in a `VITE_` variable. `.env` and `.dev.vars` are gitignored. `npm run dev` retains the local, unmetered development proxy.
+These are encrypted **runtime Worker secrets**, already configured in production and preserved by subsequent builds. The frontend build does not need them. No secret belongs in a `VITE_` variable or build-time variable. `.env` and `.dev.vars` are gitignored. `npm run dev` retains the local, unmetered development proxy.
 
 ## Sign-in
 
