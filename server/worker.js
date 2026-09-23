@@ -8,6 +8,7 @@ import {
   verify,
 } from "./auth.js";
 export { PlayAccount } from "./account.js";
+import { jevConfig } from "./jev-config.js";
 
 const STATE = "__Host-jevpilot-oauth";
 const json = (data, status = 200) =>
@@ -173,8 +174,8 @@ async function handle(request, env) {
       auth_required: true,
       authenticated: true,
       ...snapshot,
-      configured: !!env.TYPESAFE_API_KEY,
-      model: "jev-latest",
+      configured: !!jevConfig(env).apiKey,
+      model: jevConfig(env).model,
       pricing: {
         input_per_million: Number(env.JEV_INPUT_PRICE || 0.042),
         output_per_million: 0,
@@ -182,7 +183,7 @@ async function handle(request, env) {
     });
   }
   if (path === "/api/decide" && request.method === "POST") {
-    if (!env.TYPESAFE_API_KEY)
+    if (!jevConfig(env).apiKey)
       return json({ error: "Jev is temporarily unavailable." }, 503);
     const body = await readBody(request);
     const response = await account.fetch(

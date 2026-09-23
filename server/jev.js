@@ -1,4 +1,5 @@
 import { performance } from "node:perf_hooks";
+import { jevConfig } from "./jev-config.js";
 import {
   CANDIDATE_COUNT,
   decisionSelection,
@@ -70,15 +71,17 @@ export async function evaluate(state, env, signal, onUsage) {
   }
   const start = performance.now();
   const prepared = prepareJevRequest(state);
+  const config = jevConfig(env);
+  prepared.request.model = config.model;
   const requestQuestions = prepared.request.questions;
   const body = JSON.stringify(prepared.request);
   const apiCall = Object.keys(requestQuestions).length > 0;
   let data = { answers: {}, usage: { input_tokens: 0, output_tokens: 0 } };
   if (apiCall) {
-    const res = await fetch("https://api.typesafe.ai/v1/systemone", {
+    const res = await fetch(config.endpoint, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${env.TYPESAFE_API_KEY}`,
+        Authorization: `Bearer ${config.apiKey}`,
         "Content-Type": "application/json",
       },
       body,
@@ -87,7 +90,7 @@ export async function evaluate(state, env, signal, onUsage) {
     if (!res.ok) {
       const error = new Error(
         res.status === 401
-          ? "Jev rejected the API key. Update TYPESAFE_API_KEY in .env."
+          ? `Jev rejected the API key. Update ${config.keyName} in .env.`
           : res.status === 429
             ? "Jev rate limit reached. Pausing before retry."
             : `Jev API returned HTTP ${res.status}.`,
@@ -136,17 +139,20 @@ export async function evaluate(state, env, signal, onUsage) {
     usage: data.usage,
     latency_ms: Math.round(performance.now() - start),
     cost_usd:
-      (data.usage.input_tokens * inputPrice +
-        data.usage.output_tokens * outputPrice) /
-      1e6,
+      Number.isFinite(data.usage.cost) && data.usage.cost >= 0
+        ? data.usage.cost
+        : (data.usage.input_tokens * inputPrice +
+            data.usage.output_tokens * outputPrice) /
+          1e6,
     pricing: {
       input_per_million: inputPrice,
       output_per_million: outputPrice,
-      source: "https://typesafe.ai/blog/introducing-system-one-models-and-jev",
+      source: config.pricingSource,
     },
   };
 }
 export function jevMiddleware(env) {
+  const config = jevConfig(env);
   // Mounted only by Vite dev/preview. The deployed Worker always requires login.
   let active = 0;
   return async (req, res, next) => {
@@ -167,8 +173,8 @@ export function jevMiddleware(env) {
       return send(200, {
         auth_required: false,
         authenticated: false,
-        configured: !!env.TYPESAFE_API_KEY,
-        model: "jev-latest",
+        configured: !!config.apiKey,
+        model: config.model,
         pricing: {
           input_per_million: Number(env.JEV_INPUT_PRICE ?? 0.042),
           output_per_million: Number(env.JEV_OUTPUT_PRICE ?? 0),
@@ -176,9 +182,10 @@ export function jevMiddleware(env) {
       });
     if (path !== "/api/decide" || req.method !== "POST")
       return send(404, { error: "Not found" });
-    if (!env.TYPESAFE_API_KEY)
+    if (!config.apiKey)
       return send(503, {
-        error: "Set TYPESAFE_API_KEY in .env and restart the server.",
+        error:
+          "Set OPENROUTER_API_KEY or TYPESAFE_API_KEY in .env and restart the server.",
       });
     if (
       req.headers.origin &&

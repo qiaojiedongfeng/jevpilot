@@ -96,6 +96,18 @@ test("local status explicitly disables auth and has no demo credit account", asy
   }
 });
 
+test("OpenRouter-only configuration enables local driving without exposing its key", async (t) => {
+  const origin = await localServer(t, {
+    OPENROUTER_API_KEY: "openrouter-status-test",
+    JEV_MODEL: "typesafe/jev-1.13",
+  });
+  const data = await (await fetch(`${origin}/api/status`)).json();
+  assert.equal(data.configured, true);
+  assert.equal(data.model, "typesafe/jev-1.13");
+  assert.equal(data.auth_required, false);
+  assert(!JSON.stringify(data).includes("openrouter-status-test"));
+});
+
 test("local decisions need a personal Jev key, not login credentials", async (t) => {
   const origin = await localServer(t);
   const response = await fetch(`${origin}/api/decide`, {

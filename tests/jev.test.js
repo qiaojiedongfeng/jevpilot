@@ -31,6 +31,59 @@ function response(state, choice = Object.keys(candidateChoices(state))[0]) {
   };
 }
 
+test("OpenRouter preserves structured decisions and uses reported billing", async (t) => {
+  const state = new Simulation(42).decisionState();
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    assert.equal(url, "https://openrouter.ai/api/v1/systemone");
+    assert.equal(options.headers.Authorization, "Bearer openrouter-test-key");
+    const body = JSON.parse(options.body);
+    assert.equal(body.model, "typesafe/jev-1.13");
+    assert(body.state);
+    assert(body.questions.vector.criteria);
+    const result = response(state);
+    result.answers = Object.fromEntries(
+      Object.entries(body.questions).map(([name, question]) => {
+        const ids = Object.keys(question.criteria);
+        return [
+          name,
+          {
+            type: "choice",
+            choice: ids[0],
+            probabilities: Object.fromEntries(
+              ids.map((id, i) => [id, i === 0 ? 1 : 0]),
+            ),
+          },
+        ];
+      }),
+    );
+    result.usage.cost = 0.000123;
+    return Response.json(result);
+  });
+  const result = await evaluate(state, {
+    OPENROUTER_API_KEY: "openrouter-test-key",
+    TYPESAFE_API_KEY: "unused-key",
+    JEV_MODEL: "typesafe/jev-1.13",
+  });
+  assert.equal(result.cost_usd, 0.000123);
+  assert(decisionControls(state, result));
+  assert(!JSON.stringify(result).includes("openrouter-test-key"));
+});
+
+test("OpenRouter rejected keys identify the correct configuration variable", async (t) => {
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async () => new Response("", { status: 401 }),
+  );
+  await assert.rejects(
+    () =>
+      evaluate(new Simulation(42).decisionState(), {
+        OPENROUTER_API_KEY: "invalid",
+      }),
+    /OPENROUTER_API_KEY/,
+  );
+});
+
 test("Jev chooses a complete maneuver from the submitted random batch", async () => {
   const sample = new Simulation(42).decisionState();
   const original = globalThis.fetch;
@@ -140,7 +193,12 @@ test("every displayed path exactly integrates its submitted steering and speed",
       const ghost = { ...sim.player };
       const projection = sim.lastPlan.projections[id];
       for (let i = 1; i <= 60; i++) {
-        physics(ghost, maneuverSteering(ghost, candidate), candidate.velocity_mps, 0.05);
+        physics(
+          ghost,
+          maneuverSteering(ghost, candidate),
+          candidate.velocity_mps,
+          0.05,
+        );
         assert(Math.abs(ghost.x - projection.points[i].x) < 1e-9);
         assert(Math.abs(ghost.z - projection.points[i].z) < 1e-9);
       }

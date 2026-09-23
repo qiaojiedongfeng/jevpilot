@@ -33,17 +33,29 @@ Requests run up to 4 times/second near turns or traffic, and about 1.5 times/sec
 ```sh
 npm ci
 cp .env.example .env
-# Set TYPESAFE_API_KEY in .env.
+# Set OPENROUTER_API_KEY or TYPESAFE_API_KEY in .env.
 npm run dev
 ```
 
-Add your own [TypeSafe AI](https://typesafe.ai/) API key to `.env`:
+Add your own [OpenRouter](https://openrouter.ai/docs/guides/community/typesafe-sdk) API key to `.env`:
+
+```dotenv
+OPENROUTER_API_KEY=your_key_here
+JEV_MODEL=jev-latest
+```
+
+OpenRouter uses its TypeSafe-compatible `/api/v1/systemone` endpoint, preserving
+the structured decisions and choice probabilities. Reported OpenRouter costs
+are used when available. `OPENROUTER_API_KEY` takes precedence if both keys are
+set. You can pin `JEV_MODEL=typesafe/jev-1.13` when using OpenRouter.
+
+Alternatively, use a [TypeSafe AI](https://typesafe.ai/) API key:
 
 ```dotenv
 TYPESAFE_API_KEY=your_key_here
 ```
 
-Open [localhost:5173](http://localhost:5173). **Local development skips all login, signup, and demo credit limits.** No Standard Agents OAuth credentials are needed. Jev calls use your own key and TypeSafe account billing; free play works without a key. The key stays server-side in the gitignored `.env`—never use a `VITE_` variable for it.
+Open [localhost:5173](http://localhost:5173). **Local development skips all login, signup, and demo credit limits.** No Standard Agents OAuth credentials are needed. Jev calls use your own key and the selected provider's billing; free play works without a key. The key stays server-side in the gitignored `.env`—never use a `VITE_` variable for it.
 
 This also applies to `npm run preview` after `npm run build`. Restart the local server after changing `.env`.
 
