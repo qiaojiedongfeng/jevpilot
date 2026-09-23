@@ -1,5 +1,6 @@
 import { rng, choose, dist, heading, move, samplePolyline } from "./math.js";
 import { generateHighway, makeHighwayRoute } from "./highway.js";
+import { arenaWorld } from "./arena-world.js";
 export const THEMES = {
   city: {
     name: "Skyline City",
@@ -28,6 +29,13 @@ export const THEMES = {
   },
 };
 export function generateWorld(seed, type = "town") {
+  if (type === "arena") {
+    const world = arenaWorld(seed);
+    world.route = makeRoute(world, ["start", "cross", "finish"]);
+    // This exam has an uncontrolled crossing, not a mandatory stop line.
+    world.route.crossings = [];
+    return world;
+  }
   if (type === "highway") return generateHighway(seed, THEMES.highway);
   const r = rng(seed),
     theme = THEMES[type],

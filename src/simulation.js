@@ -42,6 +42,7 @@ import { collisionPose, firstCollision } from "./collisions.js";
 export { physics } from "./planning.js";
 import { createDrivingPlan, recoveryBlocked } from "./driving-plan.js";
 import { updateCourtesy } from "./courtesy.js";
+import { stepActor } from "./arena-model.js";
 import { routeFromLocation, routesFromLocation } from "./routing.js";
 
 const REROUTE_DISTANCE_M = 30;
@@ -115,7 +116,7 @@ export class Simulation {
     this.pedestrians = [];
     for (
       let i = 0;
-      i < (type === "highway" ? 0 : 14 + (type === "city" ? 12 : 0));
+      i < (["highway", "arena"].includes(type) ? 0 : 14 + (type === "city" ? 12 : 0));
       i++
     ) {
       const node = choose(this.r, this.world.nodes),
@@ -495,6 +496,7 @@ export class Simulation {
         this.locks.delete(id);
     }
     for (const p of this.pedestrians) {
+      if (p.scripted) { stepActor(p, this.player, dt); continue; }
       const node = this.world.byId[p.nodeId],
         walk = signalState(node, this.time, 0).walk;
       if (p.crossing) {
@@ -534,6 +536,7 @@ export class Simulation {
     }
     updateCourtesy(this);
     for (const v of this.traffic) {
+      if (v.scripted) { stepActor(v, this.player, dt); continue; }
       if (v.route.length - v.s < 75) this.continueTraffic(v);
       const rule = this.rule(v, true);
       let target = this.speedEnvelope(v).max;

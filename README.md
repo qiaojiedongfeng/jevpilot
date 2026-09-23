@@ -1,5 +1,22 @@
 # JevPilot
 
+## Driving exam playground (fork)
+
+The default page is now a short driving exam editor: place slow cars, parked
+cars, e-bikes and pedestrians, set straight paths and immediate/proximity
+triggers, then let Jev attempt the 211 m course. Trials finish on arrival,
+collision or a 90-second simulation timeout. Network wait freezes exam time;
+safety braking remains enabled and intervention episodes are counted.
+
+Use the left toolbox and click the map to place an actor. Drag actors to move
+them; choose a destination in the inspector. Right-drag pans, the wheel zooms,
+and **Esc** exits placement. **Ctrl+Z** undoes edits. Drafts save locally;
+JSON export/import lets you keep and exchange levels. E-bikes use a simple
+two-wheel model with a motorcycle collision footprint. This first version is
+for local development, with no public leaderboard or hosted level storage.
+
+The original playground remains available at `/?mode=drive`.
+
 https://github.com/user-attachments/assets/4baef58e-54ef-4d17-9982-353a0b6e6f45
 
 <p align="center">
