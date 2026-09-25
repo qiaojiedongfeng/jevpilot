@@ -7,6 +7,7 @@ import {
   nearestOnPath,
   pointAt,
 } from "./math.js";
+import { passingOffset } from "./passing.js";
 
 export const CANDIDATE_COUNT = 12;
 export const VECTOR_HORIZON = 3;
@@ -208,7 +209,7 @@ export function maneuverSteering(car, candidate) {
     : candidate.lookahead_m;
   const center = pointAt(car.route.points, near.s + lookahead);
   const tangent = center.heading ?? near.heading;
-  const goal = move(center, tangent + Math.PI / 2, candidate.lane_offset_m);
+  const goal = move(center, tangent + Math.PI / 2, candidate.passing ? passingOffset(candidate.passing, near.s + lookahead) : candidate.lane_offset_m);
   return steeringForCurvature(
     (2 * Math.sin(angle(heading(car, goal) - car.heading))) /
       Math.max(2, dist(car, goal)),
@@ -299,7 +300,7 @@ export function candidateName(candidate) {
 
 function movingCandidates(state) {
   const entries = Object.entries(state.vectors);
-  if (state.recovery?.blocked || state.speed_ceiling_mps === 0) return [];
+  if (state.recovery?.blocked || state.speed_ceiling_mps === 0 || state.traffic?.passing_blocked) return [];
   const moving = entries.filter(
     ([, v]) =>
       v.velocity_mps !== 0 && !(v.collision_imminent ?? v.collision_predicted),
@@ -321,6 +322,8 @@ function movingCandidates(state) {
     state.traffic?.queue && !state.recovery?.active
       ? roadSafe.filter(([, v]) => v.queue_compatible)
       : roadSafe;
+  const passing = safe.filter(([, v]) => v.passing_safe && !v.collision_predicted);
+  if (passing.length && !state.recovery?.active) return passing;
   const inLane = safe.filter(([, v]) => v.stays_in_lane);
   const returning = safe.filter(([, v]) => v.returning_to_lane);
   const preferred = state.recovery?.active

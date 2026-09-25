@@ -1,21 +1,51 @@
 # JevPilot
 
-## Driving exam playground (fork)
+## Timed driving challenges (fork)
 
-The default page is now a short driving exam editor: place slow cars, parked
-cars, e-bikes and pedestrians, set straight paths and immediate/proximity
-triggers, then let Jev attempt the 211 m course. Trials finish on arrival,
-collision or a 90-second simulation timeout. Network wait freezes exam time;
-safety braking remains enabled and intervention episodes are counted.
+The default experience uses the original 3D renderer, detailed hero vehicle,
+scenery, navigation and city/town/highway maps. Click **出题模式** to freeze the
+world and add slow cars, parked cars, motorcycles or pedestrians using the
+original models. Ambient traffic and pedestrians remain present.
 
-Use the left toolbox and click the map to place an actor. Drag actors to move
-them; choose a destination in the inspector. Right-drag pans, the wheel zooms,
-and **Esc** exits placement. **Ctrl+Z** undoes edits. Drafts save locally;
-JSON export/import lets you keep and exchange levels. E-bikes use a simple
-two-wheel model with a motorcycle collision footprint. This first version is
-for local development, with no public leaderboard or hosted level storage.
+Click a tool, then the road to place an actor. Drag to move, set speed and an
+immediate/proximity trigger, or choose a path endpoint in the inspector.
+Vehicles follow sampled road paths; pedestrians follow a straight segment.
+Moving cars and motorcycles default to continuing into native traffic after the
+waypoint, obeying signals and following rules at their configured speed. Choose
+**到终点停车** to deliberately block the road; pedestrians and stop-at-end scripts
+still follow their authored motion without independently avoiding traffic. Older
+v2 vehicle drafts without an endpoint setting default to continuing. Right-drag
+pans the editor camera, the wheel zooms, and the route slider follows navigation.
+**Esc** exits placement; **Ctrl+Z** undoes edits. Drafts save locally and support
+JSON export/import (v2, including map seed, type and time limit).
 
-The original playground remains available at `/?mode=drive`.
+Choose a 30–1800 second deadline and start the exam. Jev drives using the original
+control loop and safety brake; manual takeover is disabled during the exam.
+Arrival succeeds, collision or timeout fails. Results report time, collisions,
+violations, safety interventions and API cost. Pauses and hidden tabs do not
+advance simulation time; normal API latency is part of the original live drive.
+Repeated API errors pause the exam with a resume action. Retries regenerate the
+same map and ambient traffic and restore authored actors to their starting poses.
+
+The earlier separate low-poly arena is no longer the application entry point.
+No public leaderboard or hosted level storage is included yet.
+
+Jev can select a checked same-direction pass around a stopped or very slow
+vehicle on a clear interstate section. The bounded maneuver changes to the inner
+lane and returns before exits, with traffic clearance checks and live collision
+braking. Highway passes require at least 12 m of space to begin the maneuver.
+On straight city/town roads, a checked low-speed bypass (3 m/s) can borrow the
+opposing lane after the lead vehicle has stopped for 8 seconds, with a 6–30 m
+starting gap. Junctions, crossings, oncoming traffic, pedestrians and occupied
+return spaces prevent this maneuver. These checks remain conservative; a bypass
+is not guaranteed for every blockage or traffic queue.
+
+Signal-controlled junction reservations now check whether the reserved vehicle
+actually conflicts with the waiting vehicle's path, while preserving red-light
+stops and checks for vehicles still occupying the junction. Double-click a vehicle
+or click **路况诊断** during an exam to inspect its waiting reason. **保存卡住现场**
+downloads a diagnostic JSON snapshot with vehicle states and junction reservations
+(no API credentials); this is a debugging snapshot, not a replay/import format.
 
 https://github.com/user-attachments/assets/4baef58e-54ef-4d17-9982-353a0b6e6f45
 

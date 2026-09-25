@@ -104,7 +104,7 @@ export function prepareJevRequest(full) {
     driving_style: [
       "Aggressive right-lane driver: favor fast useful progress. Stop only for imminent collision, a required line, or arrival.",
       hasTraffic
-        ? "Follow queues without passing; close to 2m before stopping. Rear/oncoming/adjacent traffic alone is no reason to brake."
+        ? "Follow signal queues without passing. A passing_safe path permits a checked pass and return, including low-speed urban obstacle bypass on a reserved clear opposing lane; prefer it for useful progress. Never leave the lane without a passing_safe option. Close to 2m before stopping. Rear traffic alone is no reason to brake."
         : "",
       intersection
         ? "Approach the line; stop 0.5m before it. Green or completed stop: proceed when your path is clear."
@@ -241,6 +241,8 @@ export function prepareJevRequest(full) {
   const needsLaneStatus = Object.values(vectors).some((v) => !v.stays_in_lane);
   if (needsRoadStatus) columns.push("on_road", "max_offroad_fraction");
   if (needsLaneStatus) columns.push("in_lane", "returning_to_lane");
+  const hasPassing = Object.values(vectors).some(v => v.passing_safe);
+  if (hasPassing) columns.push("passing_safe");
   if (recovery)
     columns.push("recovery_distance", "road_distance_after", "on_road_after");
   const rows = Object.fromEntries(
@@ -268,6 +270,7 @@ export function prepareJevRequest(full) {
         );
       if (needsRoadStatus) row.push(v.stays_on_road, v.max_offroad_fraction);
       if (needsLaneStatus) row.push(v.stays_in_lane, v.returning_to_lane);
+      if (hasPassing) row.push(!!v.passing_safe);
       if (recovery)
         row.push(
           rounded(v.recovery_distance_m),

@@ -42,7 +42,9 @@ import { collisionPose, firstCollision } from "./collisions.js";
 export { physics } from "./planning.js";
 import { createDrivingPlan, recoveryBlocked } from "./driving-plan.js";
 import { updateCourtesy } from "./courtesy.js";
+import { reservationConflicts } from "./traffic-diagnostics.js";
 import { stepActor } from "./arena-model.js";
+import { passingOpportunity } from "./passing.js";
 import { routeFromLocation, routesFromLocation } from "./routing.js";
 
 const REROUTE_DISTANCE_M = 30;
@@ -372,9 +374,18 @@ export class Simulation {
       // At traffic lights Jev evaluates the visible traffic and candidate paths.
       // The NPC reservation must not turn a green light into a blanket stop.
       const reservationRequired = node.control === "stop" || v !== this.player;
-      if (reservationRequired && !released && lock && lock.id !== v.id) {
+      if (reservationRequired && !released && lock && lock.id !== v.id &&
+          (node.control !== "signal" || reservationConflicts(v, [this.player, ...this.traffic].find(o => o.id === lock.id), c))) {
         mustStop = true;
         reason = "Yield to crossing traffic";
+      }
+      if (node.control === "signal" && v !== this.player && delta < 25 && !mustStop) {
+        const occupied = [this.player, ...this.traffic].some(o => {
+          if (o.id === v.id || dist(o, node) > 20) return false;
+          const crossing = this.crossingFor(o);
+          return crossing?.nodeId === node.id && crossing.stopS - o.s < -0.7 && reservationConflicts(v, o, c);
+        });
+        if (occupied) { mustStop = true; reason = "Yield to crossing traffic"; }
       }
       if (node.control === "stop" && stop?.served && !released) {
         const waiting = [this.player, ...this.traffic].filter(
@@ -447,7 +458,11 @@ export class Simulation {
         reason = "Destination ahead";
       }
     }
-    const cap = followingSpeed(v, lead);
+    if (v === this.player) v.observedTime = this.time;
+    const opportunity = v === this.player && passingOpportunity(v, this.world, [...this.traffic, ...this.pedestrians]);
+    let planningMax = max;
+    const passing = v.maneuver?.passing && opportunity;
+    const cap = passing ? Math.min(passing.speed, max) : followingSpeed(v, lead);
     if (cap < max) {
       max = cap;
       reason =
@@ -455,10 +470,14 @@ export class Simulation {
           ? "Motorcycle ahead"
           : "Vehicle ahead";
     }
+    if (!opportunity) planningMax = max;
+    if (v.maneuver?.passing && v.s < v.maneuver.passing.end - 1 && !opportunity) {
+      max = 0;
+      reason = "Passing corridor blocked";
+    }
     // A hazard on the currently selected path must not zero out the speeds of
     // every new candidate. Each candidate predicts its own collisions, while
     // the real-time guard still checks whichever maneuver Jev actually selects.
-    const planningMax = max;
     const conflict =
       v === this.player
         ? predictTrafficConflict(v, [...this.traffic, ...this.pedestrians])
@@ -536,10 +555,15 @@ export class Simulation {
     }
     updateCourtesy(this);
     for (const v of this.traffic) {
-      if (v.scripted) { stepActor(v, this.player, dt); continue; }
+      if (v.scripted && !v.scripted.traffic) { stepActor(v, this.player, dt); continue; }
+      if (v.scripted) {
+        v.scripted.active ||= v.scripted.trigger === "immediate" || dist(v, this.player) <= v.scripted.distance;
+        if (!v.scripted.active) continue;
+      }
       if (v.route.length - v.s < 75) this.continueTraffic(v);
       const rule = this.rule(v, true);
       let target = this.speedEnvelope(v).max;
+      if (v.scripted) target = Math.min(target, v.scripted.speed);
       const next = pointAt(v.route.points, v.s + 9),
         h = heading(v, next);
       if (v.s < v.route.length - 1 && Math.abs(angle(h - v.heading)) > 0.2)
@@ -555,7 +579,7 @@ export class Simulation {
       if (v.s >= v.route.length - 1) {
         // Interstate vehicles continue beyond the map and recycle only after
         // leaving the view. No visible route-end teleport.
-        if (dist(v, this.player) > 1300)
+        if (!v.scripted && dist(v, this.player) > 1300)
           this.spawnTraffic(Number(v.id.split("-")[1]), true);
         else {
           v.x += Math.sin(v.heading) * v.speed * dt;
@@ -1192,7 +1216,7 @@ export class Simulation {
           "At green lights or after a completed stop, move decisively through the junction. Yield only to actual conflicting priority traffic. Do not wait for the whole intersection to become empty.",
           "Accelerate along a clear on-ramp, match interstate traffic speed while merging, then accelerate to the cruising limit. A ramp-to-merge boundary is a continuous road, not a stop or a U-turn. Slow to fit behind another vehicle only when there is an actual merging conflict.",
           "A close or closing follower behind should motivate faster forward progress when the road ahead allows it. Traffic behind, alongside, or in the opposite lane is not itself a reason to brake.",
-          "Stay in the right-hand lane, follow a normal traffic queue without passing, and use current signal and collision information. Later hypothetical conflicts are warnings to reassess, not immediate stop commands.",
+          "Follow junction queues without passing. A passing_safe vector permits a checked pass and return, including low-speed urban obstacle bypass. Never borrow an opposing lane without this checked option. Use current signal and collision information.",
         ],
       },
       speed_mps: round(this.player.speed, 1),
@@ -1219,6 +1243,7 @@ export class Simulation {
       lane: plan.lane,
       traffic: {
         queue: plan.queue,
+        passing_blocked: plan.passingBlocked,
         rear_pressure: rearPressure,
         stopped_for_s: round(
           this.player.waitingSince == null

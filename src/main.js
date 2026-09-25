@@ -1,4 +1,5 @@
 import "./style.css";
+import { Challenge } from "./challenge.js";
 import {
   createIcons,
   Braces,
@@ -81,6 +82,8 @@ const sim = new Simulation(
 let playCredits = null,
   loading = true,
   lastMapDraw = 0;
+let challenge = null,
+  decisionController = null;
 showLoading("Loading car and scenery…");
 let configured = false,
   authRequired = true,
@@ -147,6 +150,7 @@ const touch = new TouchControls(
   $("touch-controls"),
   () =>
     !loading &&
+    !challenge?.active &&
     !sim.autopilot &&
     !sim.paused &&
     !sim.crash &&
@@ -264,7 +268,8 @@ function syncPilot() {
   touch.sync();
 }
 
-function setPilot(on) {
+function setPilot(on, challengeControl = false) {
+  if (challenge?.active && !challengeControl) return;
   if (loading) return;
   touch.reset();
   if (on && playCredits?.exhausted) {
@@ -289,7 +294,11 @@ function setPilot(on) {
   scene.vectors.clear();
   syncPilot();
 }
-async function resetWorld(seed = sim.world.seed, type = sim.world.type) {
+async function resetWorld(
+  seed = sim.world.seed,
+  type = sim.world.type,
+  preserveChallenge = false,
+) {
   if (loading) return;
   loading = true;
   touch.reset();
@@ -302,6 +311,7 @@ async function resetWorld(seed = sim.world.seed, type = sim.world.type) {
   await nextPaint();
   try {
     sim.reset(seed, type);
+    challenge?.worldReset(preserveChallenge);
     minimap.resetView();
     planner.reset();
     previewError = false;
@@ -319,8 +329,10 @@ async function resetWorld(seed = sim.world.seed, type = sim.world.type) {
     tooltips.set($("pause"), "Pause simulation · P");
     createIcons({ icons });
     await finishLoading();
+    challenge?.afterReset();
   } catch (error) {
     loadingFailed(error);
+    if (preserveChallenge) throw error;
   }
 }
 async function finishLoading() {
@@ -339,6 +351,7 @@ async function finishLoading() {
   drawMap();
 }
 function changeCamera() {
+  if (challenge?.mode === "edit") return;
   const modes = ["chase", "hood", "map"];
   scene.mode = modes[(modes.indexOf(scene.mode) + 1) % 3];
   scene.snap = true;
@@ -353,6 +366,7 @@ function changeCamera() {
   );
 }
 function togglePause() {
+  if (challenge?.active && !challenge.running) return;
   if (sim.crash || loading) return;
   touch.reset();
   keys.clear();
@@ -448,6 +462,7 @@ window.addEventListener("keydown", (e) => {
   ];
   if (driving.includes(e.code)) {
     e.preventDefault();
+    if (challenge?.active) return;
     keys.add(e.code);
     if (sim.autopilot) setPilot(false);
   }
@@ -679,12 +694,16 @@ async function decide() {
     const { state, plan } = planned;
     scene.vectors.setCandidates(plan);
     lastInput = inspectRequest(state);
+    decisionController = new AbortController();
     const res = await fetch("/api/decide", {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ state, request_id: crypto.randomUUID() }),
-        signal: AbortSignal.timeout(12000),
+        signal: AbortSignal.any([
+          decisionController.signal,
+          AbortSignal.timeout(12000),
+        ]),
       }),
       data = await res.json();
     updateCredits(data.credits);
@@ -756,6 +775,10 @@ async function decide() {
       toast(error.message, "error");
       sim.event(error.message, "error");
       if (errors >= 3) {
+        if (challenge?.running) {
+          challenge.fail(error.message);
+          return;
+        }
         setPilot(false);
         toast(
           "Jev paused after three failed requests. Toggle autopilot to reconnect.",
@@ -930,7 +953,7 @@ function updateUI() {
   $("cost").textContent = playCredits
     ? `$${Math.max(0, playCredits.remaining_usd).toFixed(4)}`
     : `$${tally.cost.toFixed(6)}`;
-  if (sim.complete && !sim.freeExplore) {
+  if (sim.complete && !sim.freeExplore && !challenge?.active) {
     $("arrival").hidden = false;
     $("arrival-summary").textContent =
       `${Math.round(sim.distance)} m driven · ${sim.collisions} contacts · ${sim.violations} violations`;
@@ -963,7 +986,11 @@ function animate(now) {
     } else if (!lastApplied || now - lastApplied > 1800) sim.player.target = 0;
     // Preserve real elapsed time on slower displays using bounded physics substeps.
     const steps = Math.max(1, Math.ceil(dt / 0.025));
-    for (let i = 0; i < steps; i++) sim.step(dt / steps);
+    for (let i = 0; i < steps; i++) {
+      if (sim.paused || sim.crash) break;
+      sim.step(dt / steps);
+      challenge?.step(dt / steps);
+    }
   }
   if (scene.routeVersion !== sim.routeVersion) {
     scene.routeVersion = sim.routeVersion;
@@ -977,7 +1004,7 @@ function animate(now) {
     const destination = sim.player.route.points.at(-1);
     scene.destination.position.set(destination.x, 0.2, destination.z);
   }
-  if (sim.crash && !crashHandled) {
+  if (sim.crash && !crashHandled && !challenge?.active) {
     crashHandled = true;
     generation++;
     keys.clear();
@@ -1009,6 +1036,7 @@ function animate(now) {
     requestPreview();
   }
   scene.render(dt);
+  challenge?.tick();
   if (!$("minimap").hidden && now - lastMapDraw >= 100) {
     drawMap();
     lastMapDraw = now;
@@ -1019,6 +1047,26 @@ function animate(now) {
     updateUI();
   }
 }
+challenge = new Challenge(sim, scene, {
+  ready: () => !loading,
+  configured: () => configured && !playCredits?.exhausted,
+  cost: () => tally.cost,
+  pilot: (on) => setPilot(on, true),
+  pause: togglePause,
+  reset: resetWorld,
+  notify: (message) => toast(message, "info"),
+  invalidate: () => {
+    generation++;
+    decisionController?.abort();
+    lastApplied = 0;
+    nextDecision = 0;
+    keys.clear();
+    touch.reset();
+    scene.vectors.clear();
+    $("arrival").hidden = true;
+    $("paused-overlay").hidden = true;
+  },
+});
 refreshWorld();
 syncPilot();
 updateUI();

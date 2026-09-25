@@ -211,7 +211,7 @@ export function personModel(o) {
   const g = new THREE.Group(),
     body = new THREE.Group();
   const color = ["#c27d55", "#8d9cab", "#dec060", "#548975"][
-    Number(o.id.split("-").at(-1)) % 4
+    (Number(o.id.split("-").at(-1)) || 0) % 4
   ];
   const capsule = (parent, radius, length, x, y, z, color) => {
     const mesh = new THREE.Mesh(
@@ -986,6 +986,30 @@ export class DriveScene {
       );
     }
   }
+  syncActors() {
+    for (const [models, actors, create] of [
+      [
+        this.vehicles,
+        this.sim.traffic,
+        (v) => carModel(v.color, v.type === "motorcycle"),
+      ],
+      [this.people, this.sim.pedestrians, (p) => personModel(p)],
+    ]) {
+      const ids = new Set(actors.map((a) => a.id));
+      for (const [id, model] of models)
+        if (!ids.has(id)) {
+          this.scene.remove(model);
+          model.traverse((o) => o.geometry?.dispose());
+          models.delete(id);
+        }
+      for (const actor of actors)
+        if (!models.has(actor.id)) {
+          const model = create(actor);
+          models.set(actor.id, model);
+          this.scene.add(model);
+        }
+    }
+  }
   render(dt, draw = true) {
     const { width, height } = this.viewport;
     if (!width || !height) return;
@@ -1000,9 +1024,14 @@ export class DriveScene {
     const v = this.sim.player;
     this.vegetation.update(this.sim.time);
     this.scenery.update(v, this.sim.time);
+    const visibleAnchor = this.editorFocus || v;
     for (const o of this.scene.children)
       if (o.userData.control)
-        o.visible = Math.hypot(o.position.x - v.x, o.position.z - v.z) < 170;
+        o.visible =
+          Math.hypot(
+            o.position.x - visibleAnchor.x,
+            o.position.z - visibleAnchor.z,
+          ) < 170;
     this.player.position.set(v.x, 0, v.z);
     this.player.rotation.y = -v.heading;
     this.wheelDirection = Math.sign(v.speed) || this.wheelDirection;
@@ -1039,7 +1068,7 @@ export class DriveScene {
         const stride = p.walking
           ? Math.sin(
               this.sim.time * (p.crossing ? 10 : 5) +
-                Number(p.id.split("-").at(-1)),
+                (Number(p.id.split("-").at(-1)) || 0),
             ) * 0.42
           : 0;
         m.userData.limbs.legs.forEach(
@@ -1083,7 +1112,15 @@ export class DriveScene {
     this.destination.children[2].position.y =
       4.5 + Math.sin(this.sim.time * 2) * 0.18;
     let pos, look;
-    if (this.sim.crash) {
+    if (this.editorFocus) {
+      const view = this.cameraInput.states.map;
+      pos = new THREE.Vector3(
+        this.editorFocus.x,
+        Math.sin(view.pitch) * view.distance,
+        this.editorFocus.z + Math.cos(view.pitch) * view.distance,
+      );
+      look = new THREE.Vector3(this.editorFocus.x, 0, this.editorFocus.z);
+    } else if (this.sim.crash) {
       const side = this.sim.crash.type === "building" ? -1 : 1;
       pos = new THREE.Vector3(
         v.x - Math.sin(v.heading) * 12 + Math.cos(v.heading) * 8 * side,
@@ -1129,7 +1166,7 @@ export class DriveScene {
       pos,
       this.snap || insideCar ? 1 : 1 - Math.exp(-dt * 4),
     );
-    if (!insideCar)
+    if (!insideCar && !this.editorFocus)
       keepCameraOutsideBuildings(
         this.camera.position,
         new THREE.Vector3(v.x, 1, v.z),
@@ -1139,8 +1176,9 @@ export class DriveScene {
     this.look.lerp(look, this.snap || insideCar ? 1 : 1 - Math.exp(-dt * 6));
     this.camera.lookAt(this.look);
     this.snap = false;
-    this.sun.position.set(v.x - 55, 85, v.z + 50);
-    this.sun.target.position.set(v.x, 0, v.z);
+    const lightAnchor = this.editorFocus || v;
+    this.sun.position.set(lightAnchor.x - 55, 85, lightAnchor.z + 50);
+    this.sun.target.position.set(lightAnchor.x, 0, lightAnchor.z);
     this.vectors.render(
       v,
       this.camera,

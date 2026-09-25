@@ -8,6 +8,7 @@ export class CameraInput {
     canvas.style.touchAction = "none";
     canvas.style.cursor = "grab";
     canvas.addEventListener("pointerdown", (event) => {
+      if (this.editing) return;
       if (event.button !== 0 && event.button !== 2) return;
       pointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
       canvas.setPointerCapture(event.pointerId);
@@ -45,7 +46,7 @@ export class CameraInput {
         state.distance = clamp(
           state.distance * Math.exp(event.deltaY * 0.001),
           getMode() === "map" ? 25 : 6,
-          getMode() === "map" ? 220 : 60,
+          this.editing ? 1600 : getMode() === "map" ? 220 : 60,
         );
       },
       { passive: false },

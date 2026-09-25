@@ -328,7 +328,7 @@ export function predictTrafficConflict(vehicle, obstacles) {
         steering,
         Math.min(
           maneuverVelocity(ghost, vehicle.maneuver, target),
-          followingSpeed(ghost, ahead),
+          vehicle.maneuver?.passing ? Infinity : followingSpeed(ghost, ahead),
         ),
         step,
       );

@@ -28,6 +28,7 @@ import {
   roadState,
 } from "./road-geometry.js";
 import { collisionPose, firstCollision } from "./collisions.js";
+import { passingOpportunity } from "./passing.js";
 import {
   otherPose,
   leadVehicle,
@@ -277,18 +278,22 @@ export function createDrivingPlan(
     };
   };
   const startLane = laneMeasure(car);
+  const passing = !recovering && !requiresStop && !queue ? passingOpportunity(car, world, obstacles) : null;
+  const activePass = car.maneuver?.passing && near.s < car.maneuver.passing.end - 1 ? car.maneuver.passing : null;
   function evaluate(
     steering,
     velocity,
     laneOffset = null,
     lookahead = null,
     stopAtLine = null,
+    pass = null,
   ) {
     const maneuver = {
       steering,
       lane_offset_m: laneOffset,
       lookahead_m: lookahead,
       stop_at_line: stopAtLine,
+      passing: pass,
     };
     if (laneOffset !== null) steering = maneuverSteering(car, maneuver);
     steering = round(clamp(steering, -0.85, 0.85), 5);
@@ -299,7 +304,7 @@ export function createDrivingPlan(
       steering,
       velocity,
       maneuver,
-      limitFollowingSpeed,
+      pass ? null : limitFollowingSpeed,
     );
     let outside = 0,
       maxOutside = 0,
@@ -362,6 +367,8 @@ export function createDrivingPlan(
       velocity_mps: velocity,
       stop_at_line: stopAtLine,
       lane_offset_m: laneOffset,
+      passing: pass,
+      passing_safe: !!pass && !collision && maxOutside < 1e-5,
       lookahead_m: lookahead,
       queue_compatible: laneOffset !== null && Math.abs(laneOffset) <= 0.2,
       following_vehicle_id: lead?.other.id ?? null,
@@ -553,7 +560,15 @@ export function createDrivingPlan(
         exploratory[Math.floor((i * (exploratory.length - 1)) / 3)],
       );
   }
-  selected.push(evaluate(car.steering || 0, 0, recovering ? null : 0, 4.5));
+  selected.push(evaluate(car.steering || 0, 0, recovering ? null : 0, 4.5, null, activePass));
+  let passingBlocked = !!activePass;
+  if (passing) {
+    const candidate = evaluate(0, Math.min(maxSpeed, passing.speed), -4.5, 7, null, passing);
+    if (candidate.data.passing_safe) {
+      selected[0] = candidate;
+      passingBlocked = false;
+    }
+  }
   const vectors = {},
     projections = {};
   selected.forEach((p, i) => {
@@ -582,6 +597,7 @@ export function createDrivingPlan(
       : null,
     blockingObject: nearbyPathBlocker(car, nearby),
     queue,
+    passingBlocked,
     road,
     lane: {
       drive_on: "right",
