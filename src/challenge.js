@@ -43,6 +43,8 @@ export class Challenge {
     this.draft = newChallenge(sim.world);
     this.score = null;
     this.startCost = 0;
+    this.driver = "human";
+    this.drivers = new Set();
     this.transition = false;
     this.view = new ChallengeView(scene, {
       pick: (...args) => this.pick(...args),
@@ -71,10 +73,12 @@ export class Challenge {
       <p id="challenge-hint" class="challenge-note"></p><div id="challenge-objects"></div><div id="challenge-properties"></div>
       <p id="challenge-notice" role="status" aria-live="polite"></p>
       <div class="challenge-files"><button id="challenge-save">导出</button><button id="challenge-load">导入</button><button id="challenge-restore">恢复草稿</button><input id="challenge-file" type="file" accept=".json" hidden></div>
+      <label>挑战驾驶者 <select id="challenge-driver" aria-label="挑战驾驶者"><option value="human">自己驾驶</option><option value="jev">Jev 驾驶</option></select></label>
+      <p class="challenge-note">途中可用 Engage Jev / J 切换；WASD 或方向键驾驶，空格刹车。</p>
       <button id="challenge-start" class="primary">开始限时挑战 →</button>
     </section>
-    <section id="challenge-hud" class="glass" hidden aria-label="限时挑战状态"><span id="challenge-phase">限时挑战</span><strong id="challenge-clock">00:00</strong><span id="challenge-remaining"></span><button id="challenge-pause">暂停</button><button id="challenge-edit">修改考题</button><button id="challenge-inspect">路况诊断</button></section>
-    <dialog id="challenge-result"><span class="challenge-eyebrow">CHALLENGE REPORT</span><h2 id="challenge-outcome"></h2><p id="challenge-summary"></p><div id="challenge-result-stats"></div><div class="challenge-result-actions"><button id="challenge-result-edit">修改考题</button><button id="challenge-snapshot">保存卡住现场</button><button id="challenge-retry" class="primary">原题重试</button></div></dialog>`,
+    <section id="challenge-hud" class="glass" hidden aria-label="限时挑战状态"><span id="challenge-phase">限时挑战</span><strong id="challenge-clock">00:00</strong><span id="challenge-remaining"></span><button id="challenge-pause">暂停</button><button id="challenge-takeover" hidden>自己接手</button><button id="challenge-edit">修改考题</button><button id="challenge-inspect">路况诊断</button></section>
+    <dialog id="challenge-result"><span class="challenge-eyebrow">CHALLENGE REPORT</span><h2 id="challenge-outcome"></h2><p id="challenge-summary"></p><div id="challenge-result-stats"></div><div class="challenge-result-actions"><button id="challenge-result-edit">修改考题</button><button id="challenge-snapshot">保存卡住现场</button><label>下一位 <select id="challenge-next-driver" aria-label="下一位驾驶者"><option value="human">自己驾驶</option><option value="jev">Jev 驾驶</option></select></label><button id="challenge-retry" class="primary">原题再挑战</button></div></dialog>`,
     );
     this.inspector = installTrafficInspector(sim, scene, () => this.draft);
     $("challenge-inspect").onclick = () => this.inspector.open();
@@ -84,7 +88,9 @@ export class Challenge {
     $("challenge-start").onclick = () => this.start();
     $("challenge-edit").onclick = () => this.enter();
     $("challenge-result-edit").onclick = () => this.enter();
-    $("challenge-retry").onclick = () => this.start();
+    $("challenge-retry").onclick = () => this.start($("challenge-next-driver").value);
+    $("challenge-driver").onchange = (e) => { this.driver = e.target.value; };
+    $("challenge-takeover").onclick = () => this.resume(false);
     $("challenge-result").addEventListener("cancel", (e) => {
       e.preventDefault();
       this.enter();
@@ -336,10 +342,10 @@ export class Challenge {
     this.persist();
     await this.enter(true);
   }
-  async start() {
+  async start(driver = this.driver) {
     if (!this.api.ready()) return this.message("场景仍在加载，请稍候。");
     if (this.transition || this.mode === "run") return;
-    if (!this.api.configured())
+    if (driver === "jev" && !this.api.configured())
       return this.message("Jev 尚未连接，请先配置服务端 API Key。");
     // Commit the visible form even when its last field has not fired change yet.
     if (this.mode === "edit") {
@@ -363,16 +369,21 @@ export class Challenge {
     this.mode = "starting";
     try {
       await this.api.reset(this.draft.world.seed, this.draft.world.type, true);
+      this.driver = driver;
+      this.drivers = new Set();
       this.score = new ChallengeScore(this.draft.limit);
       this.sim.challengeClock = {limit_s: this.draft.limit, elapsed_s: 0};
       this.startCost = this.api.cost();
       this.mode = "run";
       this.view.exit();
       this.sim.paused = false;
-      this.api.pilot(true);
+      this.api.pilot(driver === "jev");
+      if (driver === "jev" && !this.sim.autopilot) throw Error("Jev 无法启动，请选择自己驾驶或检查连接。");
+      this.drivers.add(this.sim.autopilot ? "jev" : "human");
       this.render();
     } catch (error) {
       this.mode = "edit";
+      this.sim.paused = true;
       this.message(error.message);
       this.focus();
     } finally {
@@ -404,7 +415,13 @@ export class Challenge {
     );
     if (result) this.finish(result);
   }
+  driverChanged(on) {
+    if (this.running) this.drivers.add(on ? "jev" : "human");
+  }
   finish(result) {
+    result.driver = this.drivers.size > 1 ? "mixed" : this.drivers.has("jev") ? "jev" : "human";
+    const driverLabel = { human: "全程人工", jev: "全程 Jev", mixed: "中途切换" }[result.driver];
+    $("challenge-next-driver").value = this.driver;
     this.mode = "result";
     this.sim.paused = true;
     this.api.pilot(false);
@@ -425,7 +442,7 @@ export class Challenge {
           ? "未能在规定时间内到达目的地。"
           : "车辆发生碰撞，本次挑战结束。";
     $("challenge-result-stats").innerHTML =
-      `<div><strong>${result.elapsed.toFixed(1)} s</strong><span>用时 / ${result.limit} s</span></div><div><strong>${result.collisions}</strong><span>碰撞</span></div><div><strong>${result.interventions}</strong><span>安全介入</span></div><p>${Math.round(result.distance)} m · 违规 ${result.violations} · API $${result.cost.toFixed(6)}</p>`;
+      `<p>驾驶方式：${driverLabel}</p><div><strong>${result.elapsed.toFixed(1)} s</strong><span>用时 / ${result.limit} s</span></div><div><strong>${result.collisions}</strong><span>碰撞</span></div><div><strong>${result.interventions}</strong><span>安全介入</span></div><p>${Math.round(result.distance)} m · 违规 ${result.violations} · API $${result.cost.toFixed(6)}</p>`;
     $("challenge-result").showModal();
     this.render();
   }
@@ -438,11 +455,13 @@ export class Challenge {
     this.message(`AI 连接中断，计时已暂停：${message}`);
     this.render();
   }
-  resume() {
+  resume(on = true) {
     if (this.mode !== "error") return;
+    this.api.pilot(on);
+    if (on && !this.sim.autopilot) return;
     this.mode = "run";
+    this.driverChanged(on);
     this.sim.paused = false;
-    this.api.pilot(true);
     this.render();
   }
   tick() {
@@ -459,7 +478,7 @@ export class Challenge {
           ? "挑战结束"
           : this.sim.paused
             ? "计时暂停"
-            : "限时挑战";
+            : this.sim.autopilot ? "Jev 驾驶" : "自己驾驶";
     $("challenge-pause").textContent =
       this.mode === "error" ? "恢复 AI" : this.sim.paused ? "继续" : "暂停";
   }
@@ -468,6 +487,10 @@ export class Challenge {
       a = this.draft.actors.find((a) => a.id === this.selected);
     document.body.classList.toggle("challenge-editing", editing);
     document.body.classList.toggle("challenge-active", this.active);
+    document.body.classList.toggle("challenge-driving", this.running);
+    $("challenge-driver").value = this.driver;
+    $("challenge-takeover").hidden = this.mode !== "error";
+    $("autopilot").disabled = !!this.sim.crash || (this.active && !this.running);
     $("challenge-editor").hidden = !editing;
     $("challenge-hud").hidden = !this.active || editing;
     $("challenge-open").disabled = this.transition || this.active;
@@ -514,7 +537,7 @@ export class Challenge {
     );
     $("challenge-properties").innerHTML = !a
       ? ""
-      : `<h3>${ACTORS[a.kind].name}设置</h3><p class="challenge-note">起点 ${a.x.toFixed(1)}, ${a.z.toFixed(1)} · 拖动调整</p>${a.kind === "parked" ? '<p class="challenge-note">保持静止，作为占道障碍。</p>' : `<label>速度 <span><input id="challenge-speed" type="number" min="1" max="${a.kind === "pedestrian" ? 8 : 60}" value="${a.speed}"> km/h</span></label><label>出发条件 <select id="challenge-trigger"><option value="immediate" ${a.trigger === "immediate" ? "selected" : ""}>立即出发</option><option value="near" ${a.trigger === "near" ? "selected" : ""}>AI 接近时</option></select></label>${a.trigger === "near" ? `<label>触发距离 <span><input id="challenge-distance" type="number" min="5" max="100" value="${a.distance}"> m</span></label>` : ""}${["slow", "bike"].includes(a.kind) ? `<label>终点行为 <select id="challenge-end"><option value="continue" ${(a.endBehavior ?? "continue") === "continue" ? "selected" : ""}>继续进入车流</option><option value="stop" ${a.endBehavior === "stop" ? "selected" : ""}>到终点停车</option></select></label>` : ""}<button id="challenge-target">↗ ${this.targetMode ? "正在选择终点" : "在地图上设置终点"}</button><p class="challenge-note">终点 ${a.target.x.toFixed(1)}, ${a.target.z.toFixed(1)}<br>${["slow", "bike"].includes(a.kind) && (a.endBehavior ?? "continue") === "continue" ? "沿虚线驶入后续车道，遵守信号和跟车规则。" : "到达终点后停止；作为脚本障碍，不会自行避让。"}</p>`}<button id="challenge-delete">删除对象</button>`;
+      : `<h3>${ACTORS[a.kind].name}设置</h3><p class="challenge-note">起点 ${a.x.toFixed(1)}, ${a.z.toFixed(1)} · 拖动调整</p>${a.kind === "parked" ? '<p class="challenge-note">保持静止，作为占道障碍。</p>' : `<label>速度 <span><input id="challenge-speed" type="number" min="1" max="${a.kind === "pedestrian" ? 8 : 60}" value="${a.speed}"> km/h</span></label><label>出发条件 <select id="challenge-trigger"><option value="immediate" ${a.trigger === "immediate" ? "selected" : ""}>立即出发</option><option value="near" ${a.trigger === "near" ? "selected" : ""}>本车接近时</option></select></label>${a.trigger === "near" ? `<label>触发距离 <span><input id="challenge-distance" type="number" min="5" max="100" value="${a.distance}"> m</span></label>` : ""}${["slow", "bike"].includes(a.kind) ? `<label>终点行为 <select id="challenge-end"><option value="continue" ${(a.endBehavior ?? "continue") === "continue" ? "selected" : ""}>继续进入车流</option><option value="stop" ${a.endBehavior === "stop" ? "selected" : ""}>到终点停车</option></select></label>` : ""}<button id="challenge-target">↗ ${this.targetMode ? "正在选择终点" : "在地图上设置终点"}</button><p class="challenge-note">终点 ${a.target.x.toFixed(1)}, ${a.target.z.toFixed(1)}<br>${["slow", "bike"].includes(a.kind) && (a.endBehavior ?? "continue") === "continue" ? "沿虚线驶入后续车道，遵守信号和跟车规则。" : "到达终点后停止；作为脚本障碍，不会自行避让。"}</p>`}<button id="challenge-delete">删除对象</button>`;
     for (const [id, key] of [
       ["challenge-speed", "speed"],
       ["challenge-trigger", "trigger"],

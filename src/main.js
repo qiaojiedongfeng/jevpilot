@@ -151,7 +151,7 @@ const touch = new TouchControls(
   $("touch-controls"),
   () =>
     !loading &&
-    !challenge?.active &&
+    (!challenge?.active || challenge.running) &&
     !sim.autopilot &&
     !sim.paused &&
     !sim.crash &&
@@ -264,13 +264,13 @@ function syncPilot() {
   $("autopilot").setAttribute("aria-checked", String(on));
   $("pilot-label").textContent = on ? "Jev engaged" : "Engage Jev";
   tooltips.set($("autopilot"), `${on ? "Disengage" : "Engage"} Jev · J`);
-  $("autopilot").disabled = !!sim.crash;
+  $("autopilot").disabled = !!sim.crash || (!!challenge?.active && !challenge.running);
   document.body.classList.toggle("piloting", on);
   touch.sync();
 }
 
 function setPilot(on, challengeControl = false) {
-  if (challenge?.active && !challengeControl) return;
+  if (challenge?.active && !challenge.running && !challengeControl) return;
   if (loading) return;
   touch.reset();
   if (on && playCredits?.exhausted) {
@@ -282,7 +282,11 @@ function setPilot(on, challengeControl = false) {
     return;
   }
   if (sim.crash || (on && sim.complete)) return;
+  const changed = sim.autopilot !== on;
+  keys.clear();
+  decisionController?.abort();
   sim.autopilot = on;
+  if (changed && !challengeControl) challenge?.driverChanged(on);
   if (on) sim.freeExplore = false;
   generation++;
   lastApplied = 0;
@@ -463,9 +467,9 @@ window.addEventListener("keydown", (e) => {
   ];
   if (driving.includes(e.code)) {
     e.preventDefault();
-    if (challenge?.active) return;
-    keys.add(e.code);
+    if (challenge?.active && !challenge.running) return;
     if (sim.autopilot) setPilot(false);
+    keys.add(e.code);
   }
   if (e.repeat) return;
   if (e.code === "KeyJ") setPilot(!sim.autopilot);

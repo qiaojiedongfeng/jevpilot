@@ -19,12 +19,15 @@ pans the editor camera, the wheel zooms, and the route slider follows navigation
 **Esc** exits placement; **Ctrl+Z** undoes edits. Drafts save locally and support
 JSON export/import (v2, including map seed, type and time limit).
 
-Choose a 30–1800 second deadline and start the exam. Jev drives using the original
-control loop and safety brake; manual takeover is disabled during the exam.
+Choose a 30–1800 second deadline and select 自己驾驶 or Jev 驾驶. Human
+challenges need no API key. Toggle Engage Jev / J during an attempt, or use
+WASD / arrow keys to take over; Space brakes. Switching preserves the clock
+and world. Results identify human, Jev, or mixed driving. Choose the next
+driver on the result screen to retry the same question.
 Arrival succeeds, collision or timeout fails. Results report time, collisions,
 violations, safety interventions and API cost. Pauses and hidden tabs do not
 advance simulation time; normal API latency is part of the original live drive.
-Repeated API errors pause the exam with a resume action. Retries regenerate the
+Repeated API errors pause the exam with AI resume and human takeover actions. Retries regenerate the
 same map and ambient traffic and restore authored actors to their starting poses.
 
 The earlier separate low-poly arena is no longer the application entry point.

@@ -1,0 +1,36 @@
+import { chromium, expect } from '@playwright/test';
+const browser = await chromium.launch({headless:true});
+const page = await browser.newPage({viewport:{width:1280,height:900}});
+const errors=[];page.on('pageerror',e=>errors.push(e.message));
+let configured=false, requests=0;
+await page.route('**/api/status',r=>r.fulfill({json:{configured,auth_required:false}}));
+await page.route('**/api/decision',r=>{requests++;return r.fulfill({status:503,json:{error:'Test offline'}});});
+const sim = fn => page.evaluate(async f => { const {sim}=await import('/src/main.js'); return Function('sim',`return (${f})(sim)`)(sim); },fn.toString());
+const start = async driver => {await page.locator('#challenge-open').click();await expect(page.locator('#challenge-start')).toBeEnabled();await page.locator('#challenge-driver').selectOption(driver);await page.locator('#challenge-start').click();await expect(page.locator('#challenge-editor')).toBeHidden();};
+const finish = async () => {await sim(s=>{s.complete=true;});await expect(page.locator('#challenge-result')).toBeVisible();};
+try {
+ await page.goto(process.env.BASE_URL || 'http://localhost:5173/?world=town&seed=42');
+ await start('human');
+ const initial=await sim(s=>({seed:s.world.seed,x:s.player.x,z:s.player.z}));
+ await page.keyboard.down('w');await page.waitForTimeout(400);await page.keyboard.up('w');
+ expect(await sim(s=>s.distance)).toBeGreaterThan(0);
+ expect(requests).toBe(0);
+ await page.locator('#autopilot').click();expect(await sim(s=>s.autopilot)).toBe(false);
+ await finish();await expect(page.locator('#challenge-result-stats')).toContainText('全程人工');
+ await page.locator('#challenge-retry').click();await expect(page.locator('#challenge-result')).not.toBeVisible();
+ expect(await sim(s=>({seed:s.world.seed,x:s.player.x,z:s.player.z}))).toEqual(initial);
+ configured=true;await page.reload();await start('jev');
+ expect(await sim(s=>s.autopilot)).toBe(true);
+ const before=await sim(s=>s.challengeClock.elapsed_s);
+ await page.locator('#autopilot').click();expect(await sim(s=>s.autopilot)).toBe(false);
+ expect(await sim(s=>s.challengeClock.elapsed_s)).toBeGreaterThanOrEqual(before);
+ await page.keyboard.press('j');expect(await sim(s=>s.autopilot)).toBe(true);
+ await page.keyboard.down('w');await page.waitForTimeout(200);await page.keyboard.up('w');expect(await sim(s=>s.autopilot)).toBe(false);
+ await finish();await expect(page.locator('#challenge-result-stats')).toContainText('中途切换');
+ await page.locator('#challenge-next-driver').selectOption('jev');await page.locator('#challenge-retry').click();await expect(page.locator('#challenge-result')).not.toBeVisible();
+ expect(await sim(s=>s.autopilot)).toBe(true);
+ await finish();await expect(page.locator('#challenge-result-stats')).toContainText('全程 Jev');
+ await page.screenshot({path:'artifacts/challenge-drivers.png'});
+ expect(errors).toEqual([]);
+ console.log('PASS: no-key human driving, rejected AI switch, deterministic retry, live switching, keyboard takeover, human/Jev/mixed reports.');
+} finally {await browser.close();}

@@ -254,6 +254,8 @@
 }
 #challenge-result .challenge-result-actions {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: center;
   gap: 12px;
 }
@@ -271,7 +273,7 @@
 .challenge-editing .bottom-hud {
   opacity: 0.65;
 }
-.challenge-active #autopilot,
+.challenge-active:not(.challenge-driving) #autopilot,
 .challenge-active #new-world {
   pointer-events: none;
   opacity: 0.5;
