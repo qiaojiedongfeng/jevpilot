@@ -28,13 +28,14 @@ import {
   roadState,
 } from "./road-geometry.js";
 import { collisionPose, firstCollision } from "./collisions.js";
-import { passingOpportunity } from "./passing.js";
+import { passingOpportunity, urbanPassingAssessment } from "./passing.js";
 import {
   otherPose,
   leadVehicle,
   followingGap,
   followingSpeed,
   createObstaclePrediction,
+  footprintClearance,
   nearbyPathBlocker,
 } from "./traffic-safety.js";
 
@@ -160,9 +161,10 @@ export function createDrivingPlan(
   );
   const occupancy = roadOccupancy(car, surfaces),
     near = nearestOnPath(car, car.route.points);
+  const activePass = car.maneuver?.passing && near.s < car.maneuver.passing.end - 1 ? car.maneuver.passing : null;
   const recovering =
     !occupancy.on_road ||
-    near.distance > 6 ||
+    near.distance > Math.max(6, activePass ? Math.abs(activePass.offset ?? -4.5) + 1 : 0) ||
     Math.abs(angle(near.heading - car.heading)) > 1.2;
   const section = routeSection(car, near.s);
   const merging = ["onramp", "merge"].includes(section?.kind);
@@ -207,7 +209,13 @@ export function createDrivingPlan(
         car,
         obstacles.filter((o) => o.type === "car" || o.type === "motorcycle"),
       );
+  // Urban passes already reserve a complete return before any junction. A
+  // distant stop/queue must not cancel that checked maneuver midway through.
+  const urban = world.type === 'city' || world.type === 'town';
+  const passing = !recovering && (urban || !requiresStop)
+    ? passingOpportunity(car, world, obstacles, maxSpeed) : null;
   const queue =
+    !passing &&
     lead &&
     crossing &&
     ["stop", "signal"].includes(world.byId[crossing.nodeId].control) &&
@@ -278,8 +286,6 @@ export function createDrivingPlan(
     };
   };
   const startLane = laneMeasure(car);
-  const passing = !recovering && !requiresStop && !queue ? passingOpportunity(car, world, obstacles) : null;
-  const activePass = car.maneuver?.passing && near.s < car.maneuver.passing.end - 1 ? car.maneuver.passing : null;
   function evaluate(
     steering,
     velocity,
@@ -382,7 +388,13 @@ export function createDrivingPlan(
       lane_error_after_m: round(Math.abs(laneMeasure(end).offset)),
       stays_in_lane: laneExcess < 0.12,
       returning_to_lane:
-        laneExcess <= startLane.excess + 0.15 &&
+        (laneExcess <= startLane.excess + 0.15 ||
+          // Aborting a pass while pointed outward needs a brief outward arc
+          // before steering back. Judge that arc by asphalt/collision checks,
+          // not monotonic lane containment; the end must still move inward.
+          (!!activePass && !pass && laneOffset === 0 && velocity > 0 && velocity <= 2 &&
+            !collision && maxOutside < 1e-5 &&
+            laneMeasure(end).headingError < startLane.headingError)) &&
         Math.abs(laneMeasure(end).offset) < Math.abs(startLane.offset),
       route_error_m: round(tracking),
       route_progress_m: round(routeEnd.s - near.s, 1),
@@ -562,16 +574,32 @@ export function createDrivingPlan(
   }
   selected.push(evaluate(car.steering || 0, 0, recovering ? null : 0, 4.5, null, activePass));
   let passingBlocked = !!activePass;
+  let passingCheck = urban && !passing ? urbanPassingAssessment(car, world, obstacles, maxSpeed) : null;
   if (passing) {
     const candidate = evaluate(0, Math.min(maxSpeed, passing.speed), -4.5, 7, null, passing);
     if (candidate.data.passing_safe) {
       selected[0] = candidate;
       passingBlocked = false;
-    }
+      passingCheck = {available: true, reason: '可执行的超车与跟车方案交由模型比较'};
+    } else passingCheck = {available: false, reason: '轨迹预测碰撞或驶出路面',
+      collision_object_id: candidate.data.collision_object_id};
+  }
+  if (passingBlocked) {
+    const returning = evaluate(0, Math.min(maxSpeed, 2), 0, 4.5);
+    if (returning.data.stays_on_road && returning.data.returning_to_lane && !returning.data.collision_predicted)
+      selected[0] = returning;
   }
   const vectors = {},
     projections = {};
   selected.forEach((p, i) => {
+    const predict = createObstaclePrediction(car, nearby);
+    let clearance = Infinity;
+    for (let j = 0; j < p.projection.points.length; j += 6) {
+      const pose = {...car, ...p.projection.points[j]};
+      for (const {object} of predict(j * 0.05, pose))
+        clearance = Math.min(clearance, footprintClearance(pose, collisionPose(object)));
+    }
+    p.data.sampled_min_clearance_m = Number.isFinite(clearance) ? round(clearance, 2) : null;
     const id = `${batch}_${i === selected.length - 1 ? "stop" : `v${i}`}`;
     vectors[id] = p.data;
     projections[id] = p.projection;
@@ -598,6 +626,7 @@ export function createDrivingPlan(
     blockingObject: nearbyPathBlocker(car, nearby),
     queue,
     passingBlocked,
+    passingCheck,
     road,
     lane: {
       drive_on: "right",

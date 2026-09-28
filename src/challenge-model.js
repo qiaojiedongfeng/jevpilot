@@ -328,6 +328,7 @@ export class ChallengeScore {
   update(sim, dt, cost) {
     if (this.result) return this.result;
     this.elapsed += dt;
+    sim.challengeClock = {limit_s: this.limit, elapsed_s: this.elapsed};
     const braking = !!sim.brakeReason;
     if (braking && !this.braking) this.interventions++;
     this.braking = braking;

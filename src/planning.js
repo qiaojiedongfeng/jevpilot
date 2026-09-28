@@ -300,10 +300,10 @@ export function candidateName(candidate) {
 
 function movingCandidates(state) {
   const entries = Object.entries(state.vectors);
-  if (state.recovery?.blocked || state.speed_ceiling_mps === 0 || state.traffic?.passing_blocked) return [];
+  if (state.recovery?.blocked || state.speed_ceiling_mps === 0) return [];
   const moving = entries.filter(
     ([, v]) =>
-      v.velocity_mps !== 0 && !(v.collision_imminent ?? v.collision_predicted),
+      v.velocity_mps !== 0 && !v.collision_imminent && !v.collision_predicted,
   );
   const forwardOnly =
     !state.recovery?.active &&
@@ -316,6 +316,10 @@ function movingCandidates(state) {
         ([, v]) =>
           v.stays_on_road && (!forwardOnly || v.follows_route_direction),
       );
+  // A changed passing corridor must not trap the car in an endless stop. Offer
+  // a collision-free return behind the lead when the planner can produce one.
+  if (state.traffic?.passing_blocked)
+    return roadSafe.filter(([, v]) => !v.passing && v.returning_to_lane && !v.collision_predicted);
   // A normal traffic queue is not an obstacle to drive around. Keep exploratory
   // alternatives visible, but offer Jev only lane-following queue maneuvers.
   const safe =
@@ -323,7 +327,6 @@ function movingCandidates(state) {
       ? roadSafe.filter(([, v]) => v.queue_compatible)
       : roadSafe;
   const passing = safe.filter(([, v]) => v.passing_safe && !v.collision_predicted);
-  if (passing.length && !state.recovery?.active) return passing;
   const inLane = safe.filter(([, v]) => v.stays_in_lane);
   const returning = safe.filter(([, v]) => v.returning_to_lane);
   const preferred = state.recovery?.active
@@ -335,7 +338,7 @@ function movingCandidates(state) {
         : forwardOnly
           ? []
           : safe;
-  return preferred;
+  return [...new Map([...preferred, ...passing]).entries()];
 }
 
 export function stopAvailability(state, moving = movingCandidates(state)) {

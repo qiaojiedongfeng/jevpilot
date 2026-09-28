@@ -45,6 +45,7 @@ import { updateCourtesy } from "./courtesy.js";
 import { reservationConflicts } from "./traffic-diagnostics.js";
 import { stepActor } from "./arena-model.js";
 import { passingOpportunity } from "./passing.js";
+import { recordExecution } from './decision-trace.js';
 import { routeFromLocation, routesFromLocation } from "./routing.js";
 
 const REROUTE_DISTANCE_M = 30;
@@ -59,6 +60,9 @@ export class Simulation {
   reset(seed, type) {
     this.world = generateWorld(seed, type);
     this.time = 0;
+    this.challengeClock = null;
+    this.decisionTrace = [];
+    this.nextExecutionTrace = 0;
     this.paused = false;
     this.autopilot = false;
     this.safety = true;
@@ -635,6 +639,7 @@ export class Simulation {
     }
     if (this.complete) target = 0;
     v.appliedTarget = target;
+    recordExecution(this);
     if (this.autopilot || this.complete) {
       const steering = v.maneuver
         ? maneuverSteering(v, v.maneuver)
@@ -1169,7 +1174,7 @@ export class Simulation {
     // city-junction heuristic mistakes a sweeping ramp for a sharp turn.
     const turnCap = nav.phase
       ? Infinity
-      : Math.abs(nav.heading_error_deg) > 15 ||
+      : (!this.player.maneuver?.passing && Math.abs(nav.heading_error_deg) > 15) ||
           (["left", "right"].includes(nav.next_turn) &&
             nav.turn_distance_m < 24)
         ? nav.next_turn === "right"
@@ -1201,6 +1206,8 @@ export class Simulation {
     const { drivable_polygons, ...roadSummary } = plan.road;
     const state = {
       batch_id: plan.batch_id,
+      challenge: this.challengeClock ? { ...this.challengeClock,
+        remaining_s: Math.max(0, this.challengeClock.limit_s - this.challengeClock.elapsed_s) } : null,
       route_version: this.routeVersion,
       global: this.globalNavigation(),
       driving_style: {
@@ -1216,7 +1223,7 @@ export class Simulation {
           "At green lights or after a completed stop, move decisively through the junction. Yield only to actual conflicting priority traffic. Do not wait for the whole intersection to become empty.",
           "Accelerate along a clear on-ramp, match interstate traffic speed while merging, then accelerate to the cruising limit. A ramp-to-merge boundary is a continuous road, not a stop or a U-turn. Slow to fit behind another vehicle only when there is an actual merging conflict.",
           "A close or closing follower behind should motivate faster forward progress when the road ahead allows it. Traffic behind, alongside, or in the opposite lane is not itself a reason to brake.",
-          "Follow junction queues without passing. A passing_safe vector permits a checked pass and return, including low-speed urban obstacle bypass. Never borrow an opposing lane without this checked option. Use current signal and collision information.",
+          "Compare offered following, passing and returning paths using their predicted progress, clearance and junction conditions. A passing_safe vector permits a checked pass and return, not a mandatory choice. Never invent an unoffered opposing-lane path. Respect signals and avoid collisions even under a challenge deadline.",
         ],
       },
       speed_mps: round(this.player.speed, 1),
@@ -1244,6 +1251,7 @@ export class Simulation {
       traffic: {
         queue: plan.queue,
         passing_blocked: plan.passingBlocked,
+        passing_check: plan.passingCheck,
         rear_pressure: rearPressure,
         stopped_for_s: round(
           this.player.waitingSince == null

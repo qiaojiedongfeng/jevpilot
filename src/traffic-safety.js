@@ -130,9 +130,12 @@ export function nearbyPathBlocker(vehicle, obstacles) {
 
 export function followingGap(vehicle, other) {
   const speed = Math.abs(vehicle.speed);
-  return other?.type === "motorcycle"
+  const stoppedGap = other?.type === "motorcycle"
     ? Math.min(3, 0.9 + speed * 0.15)
     : Math.min(2.5, 0.5 + speed * 0.12);
+  // The short queue gap is for stopping behind a stationary obstacle. Applying
+  // it to moving traffic consumes the room needed to react and initiate a pass.
+  return other?.speed > 0.2 ? Math.max(stoppedGap, 3 + speed * 0.8) : stoppedGap;
 }
 
 export function leadVehicle(vehicle, traffic) {

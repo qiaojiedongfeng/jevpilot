@@ -40,6 +40,7 @@ import {
   nextPaint,
 } from "./loading-screen.js";
 import { prepareJevRequest, decisionInterval } from "./jev-request.js";
+import { recordDecision } from './decision-trace.js';
 import { THEMES } from "./world.js";
 import { candidateName, decisionControls } from "./planning.js";
 import { clamp, nearestOnPath } from "./math.js";
@@ -681,6 +682,7 @@ async function decide() {
   busy = true;
   const token = generation,
     started = performance.now();
+  let attempt = null;
   try {
     const planned = await refreshPlan();
     if (
@@ -689,9 +691,12 @@ async function decide() {
       !sim.autopilot ||
       sim.paused ||
       sim.crash
-    )
+    ) {
+      if (attempt) attempt.status = 'discarded_session_changed';
       return;
+    }
     const { state, plan } = planned;
+    attempt = recordDecision(sim, state);
     scene.vectors.setCandidates(plan);
     lastInput = inspectRequest(state);
     decisionController = new AbortController();
@@ -706,6 +711,10 @@ async function decide() {
         ]),
       }),
       data = await res.json();
+    Object.assign(attempt, {status: 'response', response_time_s: sim.time,
+      latency_ms: performance.now() - started, selected: data.selection?.choice,
+      probabilities: data.selection?.probabilities,
+      source: data.decision_source});
     updateCredits(data.credits);
     if (res.status === 401 && authRequired) {
       setPilot(false);
@@ -734,14 +743,17 @@ async function decide() {
       !sim.autopilot ||
       sim.paused ||
       sim.crash
-    )
+    ) {
+      attempt.status = 'discarded_session_changed';
       return;
+    }
     const controls = decisionControls(state, data);
     if (!controls) throw Error("Jev returned a mismatched candidate batch.");
     const now = performance.now();
     if (now - started > 1800)
       throw Error("Jev decision expired before it arrived. Replanning.");
     if (sim.decisionContextChanged(state)) {
+      attempt.status = 'discarded_context_changed';
       // A changed light or a newly completed stop needs another Jev decision.
       // Keep the previous maneuver briefly instead of inserting a new brake.
       nextDecision = 0;
@@ -752,6 +764,7 @@ async function decide() {
       data.answers.route.choice !== "keep" &&
       sim.chooseRoute(data.answers.route.choice)
     ) {
+      attempt.status = 'route_changed';
       nextDecision = 0;
       return;
     }
@@ -764,9 +777,11 @@ async function decide() {
     sim.player.maneuver = state.vectors[data.selection.choice];
     sim.player.steering = controls.steering;
     sim.player.target = controls.velocity;
+    Object.assign(attempt, {status: 'applied', applied_time_s: sim.time});
     scene.vectors.setAnswer(data.selection, plan);
     nextDecision = started + decisionInterval(state);
   } catch (error) {
+    if (attempt) Object.assign(attempt, {status: 'error', error: error.message});
     if (token === generation) {
       sim.player.target = 0;
       scene.vectors.clear();

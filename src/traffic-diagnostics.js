@@ -1,5 +1,6 @@
 import { pointAt, heading } from './math.js';
 import { firstCollision } from './collisions.js';
+import { urbanPassingAssessment } from './passing.js';
 
 // A reservation only applies to intersecting paths. A stopped holder still
 // occupies its actual footprint; it cannot reserve every arm indefinitely.
@@ -35,14 +36,17 @@ export function vehicleDiagnostic(sim, v) {
     if (rule.reason === 'Yield to crossing traffic') blocker = sim.locks.get(rule.nodeId)?.id;
     if (env.reason === 'Passing corridor blocked') reason = '借道空间变化，暂停绕行';
   }
-  return { id: v.id, reason, blocker: blocker ?? null, speed_kmh: Math.round(v.speed * 36) / 10,
+  const passing = v === sim.player
+    ? urbanPassingAssessment(v, sim.world, [...sim.traffic, ...sim.pedestrians]) : null;
+  return { id: v.id, reason, blocker: blocker ?? null, passing, speed_kmh: Math.round(v.speed * 36) / 10,
     waiting_s: v.waitingSince == null ? 0 : Math.max(0, Math.round(sim.time - v.waitingSince)),
     signal: rule.color, node_id: rule.nodeId ?? null, rule: rule.reason, speed_cap_mps: env.max };
 }
 
 export function diagnosticSnapshot(sim, draft = null) {
   return { version: 1, kind: 'jevpilot-traffic-diagnostic', world: {seed: sim.world.seed, type: sim.world.type},
-    time: sim.time, challenge: draft, player: sim.player, traffic: sim.traffic, pedestrians: sim.pedestrians,
+    time: sim.time, challenge: draft, challenge_clock: sim.challengeClock,
+    decision_trace: sim.decisionTrace ?? [], player: sim.player, traffic: sim.traffic, pedestrians: sim.pedestrians,
     locks: [...sim.locks], courtesy: [...sim.courtesy], crash: sim.crash,
     vehicles: [sim.player, ...sim.traffic].map(v => vehicleDiagnostic(sim, v)) };
 }

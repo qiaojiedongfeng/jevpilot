@@ -104,7 +104,7 @@ export function prepareJevRequest(full) {
     driving_style: [
       "Aggressive right-lane driver: favor fast useful progress. Stop only for imminent collision, a required line, or arrival.",
       hasTraffic
-        ? "Follow signal queues without passing. A passing_safe path permits a checked pass and return, including low-speed urban obstacle bypass on a reserved clear opposing lane; prefer it for useful progress. Never leave the lane without a passing_safe option. Close to 2m before stopping. Rear traffic alone is no reason to brake."
+        ? "Decide whether to follow, wait for an opportunity at a lower speed, pass, or return using the offered executable paths. Compare progress, passing conditions and risks; a passing_safe flag means predicted clearance, not a recommendation or guarantee. Keep the stated gap behind moving traffic; only close to 2m when stopping behind a stationary obstacle. Never invent an unoffered path. Rear traffic alone is no reason to brake."
         : "",
       intersection
         ? "Approach the line; stop 0.5m before it. Green or completed stop: proceed when your path is clear."
@@ -144,6 +144,17 @@ export function prepareJevRequest(full) {
       ).map((p) => [rounded(p.left_clearance_m), rounded(p.right_clearance_m)]),
     },
   };
+  if (full.challenge) {
+    state.challenge = {
+      goal: 'Reach the destination before the simulation-time deadline without collision or traffic violations. Time pressure never justifies a collision or violation.',
+      limit_s: rounded(full.challenge.limit_s),
+      elapsed_s: rounded(full.challenge.elapsed_s),
+      remaining_s: rounded(full.challenge.remaining_s),
+      remaining_m: rounded(full.destination_m),
+      required_average_speed_mps: full.challenge.remaining_s > 0
+        ? rounded(full.destination_m / full.challenge.remaining_s) : null,
+    };
+  }
   const global = full.global;
   if (global?.position && global?.destination) {
     const h = (global.position.heading_deg * Math.PI) / 180;
@@ -185,6 +196,7 @@ export function prepareJevRequest(full) {
   if (full.traffic?.stopped_for_s > 0)
     state.stopped_for = rounded(full.traffic.stopped_for_s);
   if (full.traffic?.deadlock_release) state.deadlock_release = true;
+  if (full.traffic?.passing_check) state.passing_check = full.traffic.passing_check;
   if (follower)
     state.rear_follower = {
       id: follower.vehicle_id,
@@ -233,6 +245,7 @@ export function prepareJevRequest(full) {
     "route_error",
     "lane_error",
     "heading_error",
+    "sampled_min_clearance",
     "end_right",
     "end_ahead",
   ];
@@ -243,6 +256,22 @@ export function prepareJevRequest(full) {
   if (needsLaneStatus) columns.push("in_lane", "returning_to_lane");
   const hasPassing = Object.values(vectors).some(v => v.passing_safe);
   if (hasPassing) columns.push("passing_safe");
+  state.maneuvers = Object.fromEntries(Object.entries(vectors).map(([id, v]) => {
+    const p = v.passing;
+    return [id, p ? {
+      action: 'pass_and_return',
+      lead_id: p.object_id,
+      estimated_duration_s: rounded(p.estimated_duration_s ?? (p.end - p.start) / p.speed),
+      remaining_distance_m: rounded(p.remaining_distance_m ?? p.end - p.start),
+      return_before_junction_m: p.return_before_junction_m ?? null,
+      route_remaining_after_m: p.route_remaining_after_m ?? null,
+      min_return_gap_m: p.min_return_gap_m ?? null,
+      risks: [p.recently_stopped ? 'lead_stopped_recently' : null,
+        p.return_before_junction_m != null && p.return_before_junction_m < 25 ? 'return_near_junction' : null,
+        p.route_remaining_after_m < 20 ? 'return_near_destination' : null].filter(Boolean),
+    } : {action: v.returning_to_lane ? 'return_to_lane' : lead ? 'follow_or_wait' : 'continue',
+      target_speed_mps: v.velocity_mps}];
+  }));
   if (recovery)
     columns.push("recovery_distance", "road_distance_after", "on_road_after");
   const rows = Object.fromEntries(
@@ -254,6 +283,7 @@ export function prepareJevRequest(full) {
         v.route_error_m,
         v.lane_error_m,
         v.heading_error_deg,
+        v.sampled_min_clearance_m,
       ].map(rounded);
       row.push(
         ...point(
@@ -283,6 +313,7 @@ export function prepareJevRequest(full) {
   if (Object.keys(rows).length) {
     state.candidates = {
       horizon_s: 3,
+      clearance_note: 'sampled_min_clearance is a sampled prediction over this preview, not a guaranteed gap for the entire maneuver; null means no nearby obstacle sample.',
       ...(needsRoadStatus ? {} : { all_on_road: true }),
       ...(needsLaneStatus ? {} : { all_in_lane: true }),
       ...table(columns, rows),
@@ -316,7 +347,7 @@ export function prepareJevRequest(full) {
     "vector",
     Object.fromEntries(Object.keys(vectors).map((id) => [id, null])),
     [
-      "Assuming drive, choose fastest useful progress with low route/lane error. Predictions include following and curve/section speed control. Keep the whole car on asphalt: negative clearance=off-road, null edges=unknown, preview end is not road end.",
+      "Assuming drive, compare all maneuvers for safe useful progress and the challenge deadline when present. A checked pass intentionally leaves the navigation lane; do not penalize its lane error as accidental drift. Decide whether its time benefit is worth the stated risks versus following or waiting. Predictions include following and curve/section speed control. Keep the whole car on asphalt: negative clearance=off-road, null edges=unknown, preview end is not road end.",
       requiredStop
         ? "Choose stop_at_line to approach then stop 0.5m before the line. Do not pick a faster crossing path."
         : intersection

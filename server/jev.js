@@ -7,6 +7,23 @@ import {
 } from "../src/planning.js";
 import { prepareJevRequest, expandJevAnswers } from "../src/jev-request.js";
 
+function validPassing(v) {
+  const p = v.passing;
+  if (!p || ![undefined, 'urban'].includes(p.kind)) return false;
+  const urban = p.kind === 'urban';
+  const offset = p.offset ?? -4.5;
+  const transition = p.transition ?? 20;
+  return ['start', 'end', 'speed'].every(k => Number.isFinite(p[k])) &&
+    p.start >= 0 && p.end > p.start && p.end - p.start <= 300 &&
+    p.speed > 0 && p.speed <= 28 && v.velocity_mps <= p.speed &&
+    typeof p.object_id === 'string' && p.object_id.length > 0 &&
+    offset === (urban ? -6 : -4.5) && Number.isFinite(transition) &&
+    transition >= 8 && transition <= 30 &&
+    v.lane_offset_m === (v.velocity_mps === 0 ? 0 : -4.5) &&
+    (v.velocity_mps === 0 || (v.passing_safe === true &&
+      v.stays_on_road === true && v.collision_predicted === false));
+}
+
 export function validState(state) {
   if (
     !Number.isFinite(state?.speed_mps) ||
@@ -31,11 +48,12 @@ export function validState(state) {
         /^[a-zA-Z0-9_]+$/.test(id) &&
         (v.lane_offset_m === null ||
           (Number.isFinite(v.lane_offset_m) &&
-            Math.abs(v.lane_offset_m) <= 1.4 &&
+            (Math.abs(v.lane_offset_m) <= 1.4 || validPassing(v)) &&
             Number.isFinite(v.lookahead_m) &&
             v.lookahead_m >= 2 &&
             v.lookahead_m <= 10)) &&
         Number.isFinite(v.steering) &&
+        (v.passing == null || validPassing(v)) &&
         Math.abs(v.steering) <= 0.85 &&
         Number.isFinite(v.velocity_mps) &&
         (v.stop_at_line == null ||

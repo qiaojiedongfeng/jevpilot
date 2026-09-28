@@ -34,6 +34,11 @@ export function installTrafficInspector(sim, scene, draft) {
     select.value = car.id;
     const d = vehicleDiagnostic(sim, car);
     output.textContent = `${d.reason}\n已停留 ${d.waiting_s} 秒 · ${d.speed_kmh} km/h\n信号：${({red:'红灯',green:'绿灯',amber:'黄灯',stop:'停车标志'})[d.signal] ?? '无'}${d.blocker ? `\n阻挡车辆：${d.blocker}` : ''}`;
+    if (d.passing) {
+      output.textContent += `\n借道检查：${d.passing.reason}`;
+      if (d.passing.lead_gap_m != null) output.textContent += `\n前车净距：${d.passing.lead_gap_m.toFixed(1)} 米`;
+      if (d.passing.required_distance_m != null) output.textContent += `\n超车所需路程：${d.passing.required_distance_m.toFixed(1)} 米`;
+    }
   }
   function open(id) { selected = id ?? sim.speedEnvelope(sim.player).lead?.other.id ?? sim.player.id; panel.hidden = false; last = 0; update(); }
   const ray = new THREE.Raycaster();

@@ -364,6 +364,7 @@ export class Challenge {
     try {
       await this.api.reset(this.draft.world.seed, this.draft.world.type, true);
       this.score = new ChallengeScore(this.draft.limit);
+      this.sim.challengeClock = {limit_s: this.draft.limit, elapsed_s: 0};
       this.startCost = this.api.cost();
       this.mode = "run";
       this.view.exit();

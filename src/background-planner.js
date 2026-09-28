@@ -35,6 +35,7 @@ export class BackgroundPlanner {
     const id = ++this.sequence;
     const snapshot = {
       time: sim.time,
+      challengeClock: sim.challengeClock,
       player: sim.player,
       traffic: sim.traffic,
       pedestrians: sim.pedestrians,
