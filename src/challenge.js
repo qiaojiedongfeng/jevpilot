@@ -1,3 +1,4 @@
+import { ChallengeHudControls } from "./challenge-hud-controls.js";
 import { installTrafficInspector } from "./traffic-inspector.js";
 import "./challenge.css";
 import {
@@ -77,9 +78,10 @@ export class Challenge {
       <p class="challenge-note">途中可用 Engage Jev / J 切换；WASD 或方向键驾驶，空格刹车。</p>
       <button id="challenge-start" class="primary">开始限时挑战 →</button>
     </section>
-    <section id="challenge-hud" class="glass" hidden aria-label="限时挑战状态"><span id="challenge-phase">限时挑战</span><strong id="challenge-clock">00:00</strong><span id="challenge-remaining"></span><button id="challenge-pause">暂停</button><button id="challenge-takeover" hidden>自己接手</button><button id="challenge-edit">修改考题</button><button id="challenge-inspect">路况诊断</button></section>
+    <section id="challenge-hud" class="glass" hidden aria-label="限时挑战状态"><div class="challenge-hud-toolbar"><button id="challenge-drag" aria-label="移动挑战面板" title="拖动移动，或使用方向键（Shift 微调）">⠿ <span>挑战控制</span></button><button id="challenge-position-reset" aria-label="重置挑战面板位置" title="重置面板位置">↺</button></div><span id="challenge-phase">限时挑战</span><strong id="challenge-clock">00:00</strong><span id="challenge-remaining"></span><button id="challenge-pause">暂停</button><button id="challenge-takeover" hidden>自己接手</button><button id="challenge-edit">修改考题</button><button id="challenge-inspect">路况诊断</button></section>
     <dialog id="challenge-result"><span class="challenge-eyebrow">CHALLENGE REPORT</span><h2 id="challenge-outcome"></h2><p id="challenge-summary"></p><div id="challenge-result-stats"></div><div class="challenge-result-actions"><button id="challenge-result-edit">修改考题</button><button id="challenge-snapshot">保存卡住现场</button><label>下一位 <select id="challenge-next-driver" aria-label="下一位驾驶者"><option value="human">自己驾驶</option><option value="jev">Jev 驾驶</option></select></label><button id="challenge-retry" class="primary">原题再挑战</button></div></dialog>`,
     );
+    this.hudControls = new ChallengeHudControls($("challenge-hud"));
     this.inspector = installTrafficInspector(sim, scene, () => this.draft);
     $("challenge-inspect").onclick = () => this.inspector.open();
     $("challenge-snapshot").onclick = () => this.inspector.exportSnapshot();

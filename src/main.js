@@ -240,6 +240,7 @@ if (import.meta.hot)
   import.meta.hot.dispose(() => {
     planner.dispose();
     minimap.dispose();
+    challenge?.hudControls.dispose();
     tooltips.dispose();
     touch.dispose();
     dockObserver.disconnect();
