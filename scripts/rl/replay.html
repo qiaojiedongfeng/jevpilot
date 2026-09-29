@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>驾驶员成长回放 · JevPilot</title>
+<style>
+:root{color-scheme:dark;--bg:#111815;--panel:#1a231f;--ink:#edf4ee;--sub:#b4c4b9;--line:#35483c;--lime:#c6ed83;--blue:#8dcfe4}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 "Microsoft YaHei","PingFang SC",sans-serif}main{max-width:1120px;margin:auto;padding:34px 28px}header{display:flex;justify-content:space-between;align-items:center;gap:24px}h1{font-size:32px;letter-spacing:-1px;margin:4px 0 8px}p{margin:0;color:var(--sub)}.eyebrow{font:12px Consolas,monospace;letter-spacing:2px;color:var(--lime)}.badge{border:1px solid var(--line);padding:8px 14px;border-radius:30px;white-space:nowrap}.summary{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin:26px 0 20px;padding:16px 0;gap:16px}.summary strong{font:32px Consolas,monospace;color:var(--lime);display:block}.summary span{color:var(--sub);font-size:13px}.controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:16px}label{display:flex;gap:8px;align-items:center;color:var(--sub);font-size:13px}select,button{background:var(--panel);border:1px solid var(--line);color:var(--ink);padding:8px 12px;border-radius:6px;font:inherit}button{cursor:pointer}button.primary{background:var(--lime);color:var(--bg);border-color:var(--lime);font-weight:bold;min-width:84px}button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--blue);outline-offset:3px}.timeline{display:flex;align-items:center;gap:14px;margin:12px 0 24px}.timeline input{flex:1;min-width:70px;accent-color:var(--lime)}output{font:14px Consolas,monospace;white-space:nowrap}.panel{border:1px solid var(--line);border-radius:10px;background:var(--panel);margin:14px 0;overflow:hidden}.panel-head{padding:13px 18px;display:flex;align-items:center;justify-content:space-between;gap:12px}.title{font-weight:bold}.result{font-size:13px;color:var(--sub)}canvas{display:block;width:100%;height:184px}.metrics{border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(4,1fr);padding:10px 18px;gap:12px;font:14px Consolas,"Microsoft YaHei",monospace}.metrics small{display:block;color:var(--sub);font:11px "Microsoft YaHei",sans-serif}.versions{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}.version{border-bottom:2px solid var(--line);padding:7px 12px;font:13px Consolas,"Microsoft YaHei",monospace}.version b{color:var(--lime);margin-left:12px}footer{font-size:12px;color:var(--sub);margin-top:20px;line-height:1.8}.run{font-family:Consolas,monospace} @media(max-width:650px){main{padding:20px 12px}header{align-items:flex-start}.badge{display:none}h1{font-size:26px}.summary strong{font-size:24px}.panel-head{flex-wrap:wrap}.metrics{grid-template-columns:repeat(2,1fr)}canvas{height:150px}.timeline{gap:8px}}
+</style>
+<main>
+<header><div><div class="eyebrow">JEVPILOT / LEARNING JOURNAL</div><h1>同一道题，看见进步。</h1><p>固定场景 · 训练前后同步对比 · 真实评估轨迹</p></div><div class="badge">CPU · 直路通过课程</div></header>
+<div class="summary"><div><span>初始版本成功率</span><strong id="initialRate"></strong></div><div><span>最后版本成功率</span><strong id="finalRate"></strong></div><div><span>本次累计策略步</span><strong id="stepCount"></strong></div></div>
+<div class="controls"><button class="primary" id="play">播放</button><button id="restart">回到起点</button><label>场景<select id="scenario" aria-label="验证场景"></select></label><label>播放速度<select id="speed"><option value="0.5">0.5×</option><option value="1" selected>1× 实时</option><option value="2">2×</option><option value="4">4×</option></select></label></div>
+<div class="timeline"><span>模拟时间</span><input id="seek" aria-label="模拟时间" type="range" min="0" value="0" step="0.025"><output id="clock"></output></div>
+<section class="panel"><div class="panel-head"><label class="title">对照 A<select id="left" aria-label="对照 A 模型"></select></label><span class="result" id="resultA"></span></div><canvas id="canvasA" role="img" aria-label="对照 A 驾驶轨迹俯视图"></canvas><div class="metrics" id="metricsA"></div></section>
+<section class="panel"><div class="panel-head"><label class="title">对照 B<select id="right" aria-label="对照 B 模型"></select></label><span class="result" id="resultB"></span></div><canvas id="canvasB" role="img" aria-label="对照 B 驾驶轨迹俯视图"></canvas><div class="metrics" id="metricsB"></div></section>
+<div class="versions" id="versions" aria-label="各阶段固定验证成绩"></div>
+<footer>60 米直路，6 米宽走廊，30 秒截止；终点不要求停车。每一版本接受相同场景测试。回合结束后车辆保持最后记录位置，不代表它主动停车。<br>这是已保存的确定性考试回放，非实时推理；位置按记录插值。道路采用俯视横向展示，车辆朝向与尺寸按同一比例绘制。<br>运行记录：<span class="run" id="run"></span></footer>
+</main>
+<script>
+const DATA = /*__REPLAY_DATA__*/;
+const $=id=>document.getElementById(id), versions=DATA.versions;
+const reasons={success:'通过终点',offroad:'离开走廊',deadline:'超时',collision:'碰撞'};
+const number=n=>n.toLocaleString('zh-CN');
+$('run').textContent=DATA.run;
+$('initialRate').textContent=`${Math.round(versions[0].success*100)}%`;
+$('finalRate').textContent=`${Math.round(versions.at(-1).success*100)}%`;
+$('stepCount').textContent=number(versions.at(-1).steps);
+versions.forEach((v,i)=>{for(const id of ['left','right']){const o=new Option(`${number(v.steps)} 步 · 成功 ${Math.round(v.success*100)}%`,i);$(id).add(o)}const d=document.createElement('div');d.className='version';d.textContent=`${number(v.steps)} 步`;const b=document.createElement('b');b.textContent=`${Math.round(v.success*100)}%`;d.append(b);$('versions').append(d)});
+DATA.seeds.forEach((seed,i)=>$('scenario').add(new Option(`第 ${i+1} 题 · ${seed}`,seed)));
+$('right').value=String(versions.length-1);
+let time=0,playing=false,last=null,total=30;
+function episode(side){return versions[Number($(side).value)].episodes.find(e=>e.seed===Number($('scenario').value))}
+function poseAt(e,t){const f=e.frames;if(t<=f[0][0])return f[0];if(t>=f.at(-1)[0])return f.at(-1);let lo=0,hi=f.length-1;while(hi-lo>1){const m=(lo+hi)>>1;if(f[m][0]<=t)lo=m;else hi=m}const a=f[lo],b=f[hi],q=(t-a[0])/(b[0]-a[0]);return a.map((v,i)=>i===3?v+Math.atan2(Math.sin(b[i]-v),Math.cos(b[i]-v))*q:i>=5?b[i]:v+(b[i]-v)*q)}
+function draw(side,suffix,color){const e=episode(side),p=poseAt(e,time),canvas=$('canvas'+suffix),ctx=canvas.getContext('2d');const w=canvas.clientWidth,h=canvas.clientHeight,dpr=window.devicePixelRatio||1;canvas.width=w*dpr;canvas.height=h*dpr;ctx.scale(dpr,dpr);const scale=(w-66)/70,x0=33+5*scale,cy=h/2;const xy=f=>[x0+(DATA.course.startZ-f[2])*scale,cy+(f[1]-DATA.course.center)*scale];
+ctx.fillStyle='#202e26';ctx.fillRect(0,0,w,h);ctx.fillStyle='#303b35';ctx.fillRect(15,cy-3*scale,w-30,6*scale);ctx.strokeStyle='#abb8aa';ctx.lineWidth=1;for(const sign of [-1,1]){ctx.beginPath();ctx.moveTo(15,cy+sign*3*scale);ctx.lineTo(w-15,cy+sign*3*scale);ctx.stroke()}ctx.setLineDash([7,10]);ctx.strokeStyle='#768379';ctx.beginPath();ctx.moveTo(15,cy);ctx.lineTo(w-15,cy);ctx.stroke();ctx.setLineDash([]);ctx.font='12px Consolas';ctx.textAlign='center';ctx.fillStyle='#d0dacd';for(let m=0;m<=60;m+=10){const x=x0+m*scale;ctx.fillText(`${m} m`,x,cy-3*scale-14);ctx.fillRect(x,cy+3*scale+3,1,6)}
+const finish=x0+60*scale;ctx.fillStyle='#c6ed83';ctx.fillRect(finish,cy-3*scale,2,6*scale);ctx.fillText('终点',finish,cy+3*scale+25);
+ctx.strokeStyle=color;ctx.globalAlpha=.4;ctx.lineWidth=2;ctx.beginPath();let first=true;for(const frame of e.frames){if(frame[0]>time)break;const [x,y]=xy(frame);if(first){ctx.moveTo(x,y);first=false}else ctx.lineTo(x,y)}const [x,y]=xy(p);ctx.lineTo(x,y);ctx.stroke();ctx.globalAlpha=1;
+ctx.save();ctx.translate(x,y);ctx.rotate(p[3]);ctx.fillStyle=color;ctx.fillRect(-2.375*scale,-.95*scale,4.75*scale,1.9*scale);ctx.fillStyle='#233c32';ctx.fillRect(.5*scale,-.75*scale,.7*scale,1.5*scale);ctx.fillStyle='#f3f7db';ctx.fillRect(2.1*scale,-.8*scale,.25*scale,.3*scale);ctx.fillRect(2.1*scale,.5*scale,.25*scale,.3*scale);ctx.restore();
+const end=e.frames.at(-1)[0],ended=time>=end-1e-7;$('result'+suffix).textContent=`${ended?'已结束':'回放中'} · 本局结果：${reasons[e.score.reason]||e.score.reason} · ${end.toFixed(1)} s`;
+const metrics=[['速度',`${(p[4]*3.6).toFixed(1)} km/h`],['前进距离',`${(DATA.course.startZ-p[2]).toFixed(1)} m`],['转向输入',`${p[5].toFixed(2)}`],['纵向输入',`${p[6].toFixed(2)} ${p[6]>=0?'油门':'刹车'}`]];$('metrics'+suffix).replaceChildren(...metrics.map(([title,value])=>{const d=document.createElement('div'),s=document.createElement('small');s.textContent=title;d.append(s,document.createTextNode(value));return d}));}
+function render(){draw('left','A','#8dcfe4');draw('right','B','#c6ed83');$('seek').value=String(time);$('clock').textContent=`${time.toFixed(1)} / ${total.toFixed(1)} s`;$('play').textContent=playing?'暂停':'播放'}
+function reset(){playing=false;time=0;total=Math.max(episode('left').frames.at(-1)[0],episode('right').frames.at(-1)[0]);$('seek').max=String(total);last=null;render()}
+function tick(now){if(playing&&last!==null){time=Math.min(total,time+(now-last)/1000*Number($('speed').value));if(time>=total)playing=false;render()}last=now;requestAnimationFrame(tick)}
+$('play').onclick=()=>{if(time>=total)time=0;playing=!playing;last=null;render()};$('restart').onclick=reset;$('seek').oninput=()=>{time=Number($('seek').value);playing=false;render()};for(const id of ['scenario','left','right'])$(id).onchange=reset;window.addEventListener('resize',render);reset();requestAnimationFrame(tick);
+</script>
+</html>
