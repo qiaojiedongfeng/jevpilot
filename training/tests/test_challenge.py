@@ -10,7 +10,8 @@ class ChallengeTests(unittest.TestCase):
         env=ChallengeEnv()
         try:
             check_env(env)
-            self.assertEqual(env.observation_space.shape,(96,))
+            self.assertEqual(env.observation_space.shape,(97,))
+            self.assertEqual(env.action_space.shape,(3,))
         finally:
             env.close()
 

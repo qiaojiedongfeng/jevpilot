@@ -17,12 +17,12 @@ from jevpilot_env import JevPilotEnv, ROOT
 from train import source_hash, write_json
 from curriculum import Curriculum, STAGES, STAGE_SEEDS, FULL_SEEDS, full_configs, score, write_report
 
-SCHEMA = "challenge-structured-v1"
+SCHEMA = "challenge-structured-v2"
 
 
 class ChallengeEnv(JevPilotEnv):
     def __init__(self, config=None, curriculum=None):
-        super().__init__(server="challenge-server.mjs", observation_size=96)
+        super().__init__(server="challenge-server.mjs", observation_size=97, action_size=3)
         self.config = config or {}
         self.curriculum = curriculum
 
@@ -30,6 +30,7 @@ class ChallengeEnv(JevPilotEnv):
         gym.Env.reset(self, seed=seed)
         scenario_seed = int(seed) if seed is not None else int(self.np_random.integers(0, 1_000_000_000))
         config = dict(curriculumStage=self.curriculum.sample(self.np_random)) if self.curriculum else self.config
+        config = dict(config, policySchema=SCHEMA)
         result = self._request("reset", seed=scenario_seed, config=config)
         return np.asarray(result["observation"], dtype=np.float32), result["info"]
 
@@ -56,6 +57,11 @@ def evaluate(model, config, seeds=range(2_000_000_000, 2_000_000_010), configs=N
     rates = {key: sum(e["reason"] == reason for e in episodes)/len(episodes)
              for key, reason in [("success_rate", "success"), ("collision_rate", "collision"),
                                  ("offroad_rate", "offroad"), ("timeout_rate", "deadline")]}
+    if configs is not None:
+        for stage, key in [(1, 'reverse_success_rate'), (5, 'long_success_rate')]:
+            group = [e for e in episodes if e['curriculum_stage'] == stage]
+            if group:
+                rates[key] = sum(e['is_success'] for e in group) / len(group)
     return dict(**rates, mean_distance_to_goal=float(np.mean([e["distance_to_goal"] for e in episodes])), episodes=episodes), examples
 
 
@@ -85,17 +91,17 @@ def save(model, run, config, evaluation, examples, curriculum=None, history=None
     pointer = run / ".latest.tmp"
     write_json(pointer, {"checkpoint": folder.name})
     pointer.replace(run / "latest.json")
-    print(json.dumps(dict(steps=model.num_timesteps, **{k:v for k,v in evaluation.items() if k!='episodes'})), flush=True)
+    print(json.dumps(dict(steps=model.num_timesteps, **{k:v for k,v in evaluation.items() if k not in ('episodes', 'stage_evaluation')})), flush=True)
     return folder
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--steps", type=int, default=100_000)
+    p.add_argument("--steps", type=int, default=500_000)
     p.add_argument("--hours", type=float, default=0)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--challenge", type=Path, help="version=2 editor export; optional task: {startS,goalS}")
-    p.add_argument("--resume", type=Path)
+    p.add_argument("--resume", type=Path, help="new v2 checkpoint directory; omitted means train from scratch")
     p.add_argument("--no-curriculum", action="store_true", help="train the original fixed challenge")
     p.add_argument("--eval-updates", type=int, default=10, help="evaluate every N complete 1024-step updates")
     p.add_argument("--run-dir", type=Path, default=ROOT/'artifacts/rl'/time.strftime('challenge-%Y%m%d-%H%M%S'))
@@ -110,8 +116,9 @@ def main():
         config=dict(draft=draft, task=draft.get('task',{}))
     if args.resume:
         manifest=json.loads((args.resume/'manifest.json').read_text(encoding='utf-8'))
-        if manifest['schema']!=SCHEMA or manifest['source_hash']!=source_hash():
-            p.error('Checkpoint schema/source mismatch')
+        # Budgets may be edited in PyCharm; action/observation compatibility is mandatory.
+        if manifest['schema'] != SCHEMA:
+            p.error('Checkpoint schema mismatch: reverse driving requires a new v2 model; omit --resume')
         if args.challenge and config!=manifest['config']:
             p.error('Cannot change the task while resuming this experiment')
         config=manifest['config']
@@ -155,7 +162,7 @@ def main():
             # A resumed initial assessment is not another promotion vote.
             if not history or history[-1]['steps'] != model.num_timesteps:
                 history.append(row)
-            evaluation['stage_evaluation'] = stage_result
+            evaluation = dict(evaluation, stage_evaluation=stage_result)
             folder = save(model,args.run_dir,config,evaluation,full_examples,curriculum,history,best,stale)
             last_saved = model.num_timesteps
             if improved:

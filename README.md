@@ -1,5 +1,7 @@
 # JevPilot
 
+[English](README.md) | [中文说明](README-zh.md)
+
 ## Timed driving challenges (fork)
 
 The default experience uses the original 3D renderer, detailed hero vehicle,

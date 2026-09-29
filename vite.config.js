@@ -5,13 +5,13 @@ export default defineConfig(({ mode }) => {
   return {
     server: {
       host: env.JEV_HOST || "localhost",
-      port: 5173,
+      port: 9999,
       strictPort: true,
       allowedHosts: (env.JEV_ALLOWED_HOSTS || "").split(",").filter(Boolean),
     },
     preview: {
       host: env.JEV_HOST || "localhost",
-      port: 5173,
+      port: 9999,
       strictPort: true,
       allowedHosts: (env.JEV_ALLOWED_HOSTS || "").split(",").filter(Boolean),
     },

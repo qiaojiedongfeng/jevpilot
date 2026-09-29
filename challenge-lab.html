@@ -6,6 +6,7 @@
 <div class="eyebrow">JEVPILOT / CHALLENGE RL</div><h1>让模型自己绕过去</h1><p>原游戏 3D 场景与碰撞物理。模型直接控制方向和踏板，无自动绕行辅助。</p>
 <h2>1 · 设置挑战</h2><label>起点（路线米数）<input id="start" type="number" min="0" value="0"></label><label>终点（路线米数）<input id="goal" type="number" min="15" value="60"></label><label>时限（秒）<input id="limit" type="number" min="30" max="1800" value="45"></label>
 <div id="arena-controls"><label>障碍横向车道<select id="obstacleX"><option value="3">右侧 +3 m</option><option value="-3">左侧 −3 m</option></select></label><label>障碍纵向位置 z<input id="obstacleZ" type="number" min="-90" max="95" value="80"></label><button id="place">更新默认障碍</button></div>
+<button id="reversePractice">倒车练习：越过终点后停回来</button><p>倒车练习从终点后方开始；修改起终点或更新默认障碍可恢复普通起步。</p>
 <label>导入现有编辑器的挑战 JSON<input id="challengeFile" type="file" accept=".json"></label><button id="export">导出当前挑战供训练</button><p id="taskName"></p>
 <h2>2 · 加载策略</h2><label>选择检查点中的 policy.json<input id="policyFile" type="file" accept=".json"></label><p id="policyName">尚未加载模型；可以先查看场景。</p>
 <h2>3 · 实际运行</h2><button id="startRun" class="primary" disabled>开始驾驶</button><button id="pause" disabled>暂停</button><button id="reset">重置场景</button><label>视角<select id="camera"><option value="chase">跟车</option><option value="map">俯视</option><option value="hood">车内</option></select></label>

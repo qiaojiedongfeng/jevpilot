@@ -17,9 +17,9 @@ SCHEMA = "straight-pass-v1"
 class JevPilotEnv(gym.Env):
     metadata = {"render_modes": []}
 
-    def __init__(self, timeout=15, server="env-server.mjs", observation_size=10):
+    def __init__(self, timeout=15, server="env-server.mjs", observation_size=10, action_size=2):
         super().__init__()
-        self.action_space = gym.spaces.Box(-1, 1, (2,), dtype=np.float32)
+        self.action_space = gym.spaces.Box(-1, 1, (action_size,), dtype=np.float32)
         self.observation_space = gym.spaces.Box(-1, 1, (observation_size,), dtype=np.float32)
         node = shutil.which("node")
         if not node:
@@ -83,8 +83,8 @@ class JevPilotEnv(gym.Env):
 
     def step(self, action):
         action = np.asarray(action)
-        if action.shape != (2,) or not np.isfinite(action).all():
-            raise ValueError("Expected two finite action values")
+        if action.shape != self.action_space.shape or not np.isfinite(action).all():
+            raise ValueError(f"Expected {self.action_space.shape[0]} finite action values")
         result = self._request("step", action=action.tolist())
         return (np.asarray(result["observation"], dtype=np.float32),
                 float(result["reward"]), result["terminated"], result["truncated"], result["info"])
