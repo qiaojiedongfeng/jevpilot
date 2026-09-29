@@ -17,10 +17,10 @@ SCHEMA = "straight-pass-v1"
 class JevPilotEnv(gym.Env):
     metadata = {"render_modes": []}
 
-    def __init__(self, timeout=15):
+    def __init__(self, timeout=15, server="env-server.mjs", observation_size=10):
         super().__init__()
         self.action_space = gym.spaces.Box(-1, 1, (2,), dtype=np.float32)
-        self.observation_space = gym.spaces.Box(-1, 1, (10,), dtype=np.float32)
+        self.observation_space = gym.spaces.Box(-1, 1, (observation_size,), dtype=np.float32)
         node = shutil.which("node")
         if not node:
             raise RuntimeError("Node.js not found in PATH")
@@ -31,7 +31,7 @@ class JevPilotEnv(gym.Env):
         self.errors = tempfile.TemporaryFile(mode="w+b")
         try:
             self.process = subprocess.Popen(
-                [node, str(ROOT / "scripts/rl/env-server.mjs")], cwd=ROOT,
+                [node, str(ROOT / "scripts/rl" / server)], cwd=ROOT,
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.errors,
                 text=True, encoding="utf-8", bufsize=1,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
